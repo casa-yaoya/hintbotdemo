@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import type { AudioMetadata, HintCondition, PhraseConfig } from '~/composables/useRealtimeAPI'
+import type { AudioMetadata, HintCondition, HintRule, PhraseConfig } from '~/composables/useRealtimeAPI'
 
-const DEFAULT_PROMPT = `あなたは会話を聞いてヒントを提供するアシスタントです。
-人間の会話を聞いて、適切なタイミングで簡潔なヒントやアドバイスを日本語で提供してください。
-答えを直接教えるのではなく、考えるきっかけとなるヒントを与えてください。`
+const DEFAULT_PROMPT = `あなたはフレーズ検出アシスタントです。
+ユーザーの発話を聞いて、登録されたフレーズを検出してください。
+フレーズを検出したら detect_phrase 関数を呼び出してください。`
 
 const DEFAULT_PHRASES: PhraseConfig[] = [
   { phrase: '国士無双１３面待ち', matchType: 'exact' },
@@ -11,11 +11,23 @@ const DEFAULT_PHRASES: PhraseConfig[] = [
   { phrase: 'こんにちは', matchType: 'semantic', semanticHint: '挨拶全般（おはよう、ハロー、やあ等も含む）' },
 ]
 
+const DEFAULT_HINT_RULES: HintRule[] = [
+  {
+    id: 'default-greeting',
+    name: '挨拶ヒント',
+    triggerPhrases: ['こんにちは'],
+    hintText: '挨拶が検出されました！元気よく返事をしましょう。',
+    enabled: true,
+  },
+]
+
 const prompt = useLocalStorage('hintbot-prompt', DEFAULT_PROMPT)
 const phrases = useLocalStorage<PhraseConfig[]>('hintbot-phrases', DEFAULT_PHRASES)
+const hintRules = useLocalStorage<HintRule[]>('hintbot-hint-rules', DEFAULT_HINT_RULES)
 
 const isSettingsOpen = ref(false)
 const currentHint = ref('')
+const triggeredRuleIds = ref<Set<string>>(new Set())
 
 const {
   isConnected,
@@ -31,27 +43,42 @@ const {
   onError,
 } = useRealtimeAPI()
 
-onHintCheck.value = (metadata: AudioMetadata): HintCondition => {
-  if (metadata.lastSpeechTimestamp > 0 && metadata.silenceDuration > 3000) {
-    return {
-      shouldShowHint: true,
-      reason: '3秒以上の沈黙を検出',
+// フレーズ検出に基づいてヒントルールをチェック
+function checkHintRules(metadata: AudioMetadata): string | null {
+  const detectedPhrases = metadata.phraseDetections
+    .filter(p => p.detected)
+    .map(p => p.phrase)
+
+  for (const rule of hintRules.value) {
+    if (!rule.enabled) continue
+    if (triggeredRuleIds.value.has(rule.id)) continue
+
+    // すべてのトリガーフレーズが検出されているかチェック
+    const allTriggersDetected = rule.triggerPhrases.every((trigger: string) =>
+      detectedPhrases.includes(trigger),
+    )
+
+    if (allTriggersDetected) {
+      triggeredRuleIds.value.add(rule.id)
+      return rule.hintText
     }
   }
-  return { shouldShowHint: false }
+  return null
 }
 
-onAIResponse.value = (text: string, isFinal: boolean) => {
-  if (isFinal) {
-    currentHint.value = text
+onHintCheck.value = (metadata: AudioMetadata): HintCondition => {
+  const hintText = checkHintRules(metadata)
+  if (hintText) {
+    currentHint.value = hintText
     setTimeout(() => {
       currentHint.value = ''
     }, 10000)
   }
-  else {
-    currentHint.value = text
-  }
+  return { shouldShowHint: false }
 }
+
+// AI応答は使わない（ヒントは設定済みテキストから表示）
+onAIResponse.value = null
 
 onError.value = (error: string) => {
   console.error('Error:', error)
@@ -64,11 +91,11 @@ watch(phrases, (newPhrases) => {
 async function handleToggle() {
   if (!isConnected.value) {
     resetPhraseDetections()
+    triggeredRuleIds.value.clear()
     currentHint.value = ''
   }
   await toggleRoleplay({
     instructions: prompt.value,
-    voice: 'shimmer',
     batchIntervalMs: 2000,
   })
 }
@@ -83,6 +110,10 @@ function handleUpdatePrompt(newPrompt: string) {
 
 function handleUpdatePhrases(newPhrases: PhraseConfig[]) {
   phrases.value = newPhrases
+}
+
+function handleUpdateHintRules(newRules: HintRule[]) {
+  hintRules.value = newRules
 }
 </script>
 
@@ -144,8 +175,10 @@ function handleUpdatePhrases(newPhrases: PhraseConfig[]) {
       v-model="isSettingsOpen"
       :prompt="prompt"
       :phrases="phrases"
+      :hint-rules="hintRules"
       @update:prompt="handleUpdatePrompt"
       @update:phrases="handleUpdatePhrases"
+      @update:hint-rules="handleUpdateHintRules"
     />
   </div>
 </template>

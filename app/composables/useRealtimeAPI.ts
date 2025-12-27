@@ -29,8 +29,15 @@ export interface HintCondition {
   reason?: string
 }
 
+export interface HintRule {
+  id: string
+  name: string
+  triggerPhrases: string[]  // 発火条件となるフレーズ名の配列（AND条件）
+  hintText: string          // 表示するヒントテキスト
+  enabled: boolean
+}
+
 export interface RealtimeConfig {
-  voice?: string
   instructions?: string
   batchIntervalMs?: number
 }
@@ -291,7 +298,7 @@ ${semanticPhrases.map(p => `「${p.phrase}」${p.semanticHint ? `（${p.semantic
         sendEvent({
           type: 'response.create',
           response: {
-            modalities: ['text', 'audio'],
+            modalities: ['text'],
           },
         })
       }
@@ -420,11 +427,9 @@ ${semanticPhrases.map(p => `「${p.phrase}」${p.semanticHint ? `（${p.semantic
         sendEvent({
           type: 'session.update',
           session: {
-            modalities: ['text', 'audio'],
-            voice: config?.voice || 'shimmer',
+            modalities: ['text'],
             instructions,
             input_audio_format: 'pcm16',
-            output_audio_format: 'pcm16',
             input_audio_transcription: {
               model: 'whisper-1',
             },
@@ -513,7 +518,7 @@ ${semanticPhrases.map(p => `「${p.phrase}」${p.semanticHint ? `（${p.semantic
     sendEvent({
       type: 'response.create',
       response: {
-        modalities: ['text', 'audio'],
+        modalities: ['text'],
       },
     })
   }
