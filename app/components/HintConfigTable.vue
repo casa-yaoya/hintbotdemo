@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import type { HintType, PhraseConfig } from '~/composables/useRealtimeAPI'
+import type { HintType, PhraseConfig, StatusType } from '~/composables/useRealtimeAPI'
 
 interface Props {
   configs: PhraseConfig[]
+  statusType: StatusType
+  title: string
 }
 
 const props = defineProps<Props>()
@@ -11,7 +13,12 @@ const emit = defineEmits<{
   'update:configs': [value: PhraseConfig[]]
 }>()
 
-const localConfigs = ref<PhraseConfig[]>([...props.configs])
+// このstatusTypeに該当するconfigのみ表示
+const filteredConfigs = computed(() =>
+  props.configs.filter(c => c.statusType === props.statusType),
+)
+
+const localConfigs = ref<PhraseConfig[]>([...filteredConfigs.value])
 
 // 新規追加用
 const newPhrase = ref('')
@@ -24,9 +31,16 @@ const hintTypeOptions = [
   { label: 'AI', value: 'ai' },
 ]
 
-watch(() => props.configs, (val) => {
+watch(filteredConfigs, (val) => {
   localConfigs.value = [...val]
 }, { deep: true })
+
+// localConfigsを全体のconfigsにマージして返す
+function mergeConfigs(): PhraseConfig[] {
+  // 他のstatusTypeのconfigsを保持しつつ、このstatusTypeのものを更新
+  const otherConfigs = props.configs.filter(c => c.statusType !== props.statusType)
+  return [...otherConfigs, ...localConfigs.value]
+}
 
 function updateField(index: number, field: keyof PhraseConfig, value: string) {
   const config = localConfigs.value[index]
@@ -36,7 +50,7 @@ function updateField(index: number, field: keyof PhraseConfig, value: string) {
   else {
     (config as Record<string, unknown>)[field] = value
   }
-  emit('update:configs', [...localConfigs.value])
+  emit('update:configs', mergeConfigs())
 }
 
 function addConfig() {
@@ -48,13 +62,14 @@ function addConfig() {
     id: crypto.randomUUID(),
     phrase: newPhrase.value.trim(),
     description: newDescription.value.trim() || undefined,
+    statusType: props.statusType, // propsのstatusTypeを使用
     hintType: newHintType.value,
     hintText: newHintType.value === 'fixed' ? newHintText.value.trim() : '',
     enabled: true,
   }
 
   localConfigs.value.push(config)
-  emit('update:configs', [...localConfigs.value])
+  emit('update:configs', mergeConfigs())
 
   newPhrase.value = ''
   newDescription.value = ''
@@ -64,12 +79,12 @@ function addConfig() {
 
 function removeConfig(index: number) {
   localConfigs.value.splice(index, 1)
-  emit('update:configs', [...localConfigs.value])
+  emit('update:configs', mergeConfigs())
 }
 
 function toggleConfig(index: number) {
   localConfigs.value[index].enabled = !localConfigs.value[index].enabled
-  emit('update:configs', [...localConfigs.value])
+  emit('update:configs', mergeConfigs())
 }
 </script>
 
@@ -77,7 +92,7 @@ function toggleConfig(index: number) {
   <div class="hint-config-table">
     <div class="mb-2 flex items-center justify-between">
       <h3 class="text-sm font-semibold text-slate-700">
-        ステータス / ヒント設定
+        {{ title }}
       </h3>
     </div>
 

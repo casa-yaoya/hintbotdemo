@@ -1,5 +1,8 @@
 export type HintType = 'fixed' | 'ai' // 固定ヒント or AIヒント
 
+// ステータス種別
+export type StatusType = 'flow' | 'spot' // フローステータス or スポットステータス
+
 // LLMが返す根拠タイプ
 export type EvidenceType = 'explicit' | 'implicit' | 'weak'
 
@@ -7,6 +10,7 @@ export interface PhraseConfig {
   id: string
   phrase: string // ステータス名
   description?: string // ステータス定義（どのような状態か）
+  statusType: StatusType // ステータス種別（flow: フロー, spot: スポット）
   hintType: HintType // ヒントタイプ
   hintText: string // 固定ヒント（hintType='fixed'の場合）
   enabled: boolean
@@ -54,10 +58,14 @@ export interface HintState {
 
 // 現在の会話ステータス
 export interface CurrentStatus {
-  index: number // 現在のステータスインデックス（-1: 未開始）
-  name: string | null // 現在のステータス名
+  // フローステータス
+  index: number // 現在のフローステータスインデックス（-1: 未開始、0が最初）
+  name: string | null // 現在のフローステータス名
   changedAt: number | null // ステータス変更時刻
   recentDetections: RecentDetection[] // 短期間の検出履歴（リングバッファ）
+  // スポットステータス
+  spotName: string | null // 現在発火中のスポットステータス名（null: 発火なし）
+  spotChangedAt: number | null // スポットステータス変更時刻
 }
 
 export interface AudioMetadata {
@@ -238,6 +246,8 @@ export function useRealtimeAPI() {
     name: null,
     changedAt: null,
     recentDetections: [],
+    spotName: null,
+    spotChangedAt: null,
   })
 
   const audioMetadata = ref<AudioMetadata>({
@@ -663,14 +673,28 @@ ${enabledPhrases.map((p, index) => {
       confirmTimer = null
     }
 
-    // 現在のステータスを更新
-    const enabledPhrases = registeredPhrases.value.filter(p => p.enabled)
-    const statusIndex = enabledPhrases.findIndex(p => p.phrase === statusName)
-    currentStatus.value = {
-      index: statusIndex,
-      name: statusName,
-      changedAt: now,
-      recentDetections: currentStatus.value.recentDetections,
+    // 該当するPhraseConfigを取得してステータス種別を判定
+    const phraseConfig = registeredPhrases.value.find(p => p.phrase === statusName)
+    const statusType = phraseConfig?.statusType || 'flow'
+
+    if (statusType === 'flow') {
+      // フローステータス: インデックスを更新
+      const enabledFlowPhrases = registeredPhrases.value.filter(p => p.enabled && p.statusType === 'flow')
+      const statusIndex = enabledFlowPhrases.findIndex(p => p.phrase === statusName)
+      currentStatus.value = {
+        ...currentStatus.value,
+        index: statusIndex,
+        name: statusName,
+        changedAt: now,
+      }
+    }
+    else {
+      // スポットステータス: スポット名を更新（前のスポットは消える）
+      currentStatus.value = {
+        ...currentStatus.value,
+        spotName: statusName,
+        spotChangedAt: now,
+      }
     }
 
     // 仮判定状態に移行
@@ -756,6 +780,8 @@ ${enabledPhrases.map((p, index) => {
       name: null,
       changedAt: null,
       recentDetections: [],
+      spotName: null,
+      spotChangedAt: null,
     }
   }
 
@@ -1169,6 +1195,17 @@ ${enabledPhrases.map((p, index) => {
             tool_choice: tools.length > 0 ? 'auto' : 'none',
           },
         })
+
+        // 接続成功時、最初のフローステータスを点滅状態にする
+        const enabledFlowPhrases = registeredPhrases.value.filter(p => p.enabled && p.statusType === 'flow')
+        if (enabledFlowPhrases.length > 0) {
+          currentStatus.value = {
+            ...currentStatus.value,
+            index: 0,
+            name: enabledFlowPhrases[0]?.phrase ?? null,
+            changedAt: Date.now(),
+          }
+        }
 
         startAudioCapture()
       }
