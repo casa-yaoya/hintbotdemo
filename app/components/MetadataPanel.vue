@@ -3,8 +3,9 @@ import type { AudioMetadata } from '~/composables/useRealtimeAPI'
 
 interface LogEntry {
   timestamp: string
-  type: 'step' | 'hint'
+  type: 'step' | 'hint' | 'transcript'
   message: string
+  matchedPhrase?: string // 検出されたフレーズ（あれば）
 }
 
 interface Props {
@@ -21,25 +22,27 @@ const volumeDb = computed(() => props.metadata.volumeDb.toFixed(1))
 const silenceDurationSec = computed(() => {
   return (props.metadata.silenceDuration / 1000).toFixed(1)
 })
+
+const logContainer = ref<HTMLElement | null>(null)
+
+watch(() => props.logs.length, () => {
+  nextTick(() => {
+    if (logContainer.value) {
+      logContainer.value.scrollTop = 0
+    }
+  })
+})
+
+// 文字起こしログのみ抽出
+const transcriptLogs = computed(() => {
+  return props.logs.filter(log => log.type === 'transcript').slice(0, 5)
+})
 </script>
 
 <template>
-  <div class="metadata-panel w-full rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-    <h3 class="mb-3 text-sm font-semibold text-slate-700">
-      ステータス
-    </h3>
-
-    <div class="space-y-3">
-      <div class="flex items-center justify-between">
-        <span class="text-sm text-slate-500">状態</span>
-        <UBadge
-          :color="isActive ? 'success' : 'neutral'"
-          variant="subtle"
-        >
-          {{ isActive ? 'アクティブ' : '停止中' }}
-        </UBadge>
-      </div>
-
+  <div class="metadata-panel flex h-full w-full flex-col rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+    <!-- ボリュームと沈黙時間 -->
+    <div class="mb-3 space-y-2">
       <div class="flex items-center justify-between">
         <span class="text-sm text-slate-500">ボリューム</span>
         <div class="flex items-center gap-2">
@@ -54,78 +57,69 @@ const silenceDurationSec = computed(() => {
       </div>
 
       <div class="flex items-center justify-between">
-        <span class="text-sm text-slate-500">音声検出</span>
-        <UBadge
-          :color="metadata.isSpeechDetected ? 'warning' : 'neutral'"
-          variant="subtle"
-        >
-          {{ metadata.isSpeechDetected ? '検出中' : '無音' }}
-        </UBadge>
-      </div>
-
-      <div class="flex items-center justify-between">
         <span class="text-sm text-slate-500">沈黙時間</span>
         <span class="text-sm text-slate-700">{{ silenceDurationSec }} 秒</span>
       </div>
+    </div>
 
-      <div
-        v-if="metadata.phraseDetections.length > 0"
-        class="border-t border-slate-100 pt-3"
-      >
-        <h4 class="mb-2 text-sm font-medium text-slate-600">
-          フレーズ検出
-        </h4>
-        <div class="space-y-2">
+    <!-- 文字起こし履歴 -->
+    <div class="mb-3 border-t border-slate-100 pt-3">
+      <h4 class="mb-2 text-sm font-medium text-slate-600">
+        文字起こし（直近5件）
+      </h4>
+      <div class="max-h-[100px] space-y-1 overflow-y-auto">
+        <div
+          v-for="(log, index) in transcriptLogs"
+          :key="index"
+          class="rounded bg-slate-50 p-1.5 text-xs"
+        >
+          <div class="flex items-start gap-2">
+            <span class="shrink-0 font-mono text-slate-400">{{ log.timestamp }}</span>
+            <span class="flex-1 text-slate-700">{{ log.message }}</span>
+          </div>
           <div
-            v-for="detection in metadata.phraseDetections"
-            :key="detection.phrase"
-            class="flex items-center justify-between rounded-lg bg-slate-50 p-2"
+            v-if="log.matchedPhrase"
+            class="mt-1 flex items-center gap-1"
           >
-            <div class="flex items-center gap-2">
-              <UBadge
-                :color="detection.matchType === 'exact' ? 'info' : 'warning'"
-                variant="subtle"
-                size="xs"
-              >
-                {{ detection.matchType === 'exact' ? '完全' : '意味' }}
-              </UBadge>
-              <span class="text-sm text-slate-700">{{ detection.phrase }}</span>
-            </div>
-            <UIcon
-              v-if="detection.detected"
-              name="lucide:check-circle"
-              class="h-4 w-4 text-green-500"
-            />
-            <UIcon
-              v-else
-              name="lucide:circle"
-              class="h-4 w-4 text-slate-300"
-            />
+            <UIcon name="lucide:check-circle" class="h-3 w-3 text-green-500" />
+            <span class="text-green-600">「{{ log.matchedPhrase }}」検出</span>
           </div>
         </div>
+        <div
+          v-if="transcriptLogs.length === 0"
+          class="text-xs text-slate-400"
+        >
+          文字起こしなし
+        </div>
       </div>
+    </div>
 
-      <!-- ログエリア -->
+    <!-- ログエリア -->
+    <div class="flex-1 border-t border-slate-100 pt-3">
+      <h4 class="mb-2 text-sm font-medium text-slate-600">
+        システムログ
+      </h4>
       <div
-        v-if="logs.length > 0"
-        class="border-t border-slate-100 pt-3"
+        ref="logContainer"
+        class="h-[100px] space-y-1 overflow-y-auto"
       >
-        <h4 class="mb-2 text-sm font-medium text-slate-600">
-          ログ
-        </h4>
-        <div class="max-h-48 space-y-1 overflow-y-auto">
-          <div
-            v-for="(log, index) in logs"
-            :key="index"
-            class="flex items-start gap-2 text-xs"
+        <div
+          v-for="(log, index) in logs.filter(l => l.type !== 'transcript')"
+          :key="index"
+          class="flex items-start gap-2 text-xs"
+        >
+          <span class="shrink-0 font-mono text-slate-400">{{ log.timestamp }}</span>
+          <span
+            :class="log.type === 'hint' ? 'text-amber-600' : 'text-blue-600'"
           >
-            <span class="shrink-0 font-mono text-slate-400">{{ log.timestamp }}</span>
-            <span
-              :class="log.type === 'hint' ? 'text-amber-600' : 'text-blue-600'"
-            >
-              {{ log.message }}
-            </span>
-          </div>
+            {{ log.message }}
+          </span>
+        </div>
+        <div
+          v-if="logs.filter(l => l.type !== 'transcript').length === 0"
+          class="text-xs text-slate-400"
+        >
+          ログなし
         </div>
       </div>
     </div>
