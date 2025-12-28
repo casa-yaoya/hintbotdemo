@@ -31,7 +31,6 @@ export interface HintCondition {
 
 export interface HintRule {
   id: string
-  name: string
   triggerPhrases: string[]  // 発火条件となるフレーズ名の配列（AND条件）
   hintText: string          // 表示するヒントテキスト
   enabled: boolean
@@ -64,6 +63,8 @@ export function useRealtimeAPI() {
 
   const onAIResponse = ref<((text: string, isFinal: boolean) => void) | null>(null)
   const onHintCheck = ref<((metadata: AudioMetadata) => HintCondition) | null>(null)
+  const onPhraseDetected = ref<((phrase: string, metadata: AudioMetadata) => void) | null>(null)
+  const onLog = ref<((step: string) => void) | null>(null)
   const onError = ref<((error: string) => void) | null>(null)
 
   let websocket: WebSocket | null = null
@@ -232,11 +233,13 @@ ${semanticPhrases.map(p => `「${p.phrase}」${p.semanticHint ? `（${p.semantic
           audioMetadata.value.isSpeechDetected = true
           audioMetadata.value.lastSpeechTimestamp = Date.now()
           audioMetadata.value.silenceDuration = 0
+          if (onLog.value) onLog.value('[2] 発話開始検知（VAD）')
           break
 
         case 'input_audio_buffer.speech_stopped':
           isSpeaking.value = false
           audioMetadata.value.isSpeechDetected = false
+          if (onLog.value) onLog.value('[3] 発話終了検知（VAD）')
           break
 
         case 'response.audio.delta':
@@ -260,6 +263,7 @@ ${semanticPhrases.map(p => `「${p.phrase}」${p.semanticHint ? `（${p.semantic
           break
 
         case 'response.function_call_arguments.done':
+          if (onLog.value) onLog.value('[4] 関数呼び出し受信（GPT-4o）')
           handleFunctionCall(data)
           break
 
@@ -292,6 +296,13 @@ ${semanticPhrases.map(p => `「${p.phrase}」${p.semanticHint ? `（${p.semantic
           audioMetadata.value.phraseDetections[phraseIndex].detectedAt = Date.now()
           if (detectedExpression) {
             audioMetadata.value.phraseDetections[phraseIndex].detectedExpression = detectedExpression
+          }
+
+          if (onLog.value) onLog.value(`[5] フレーズ検出「${phrase}」`)
+
+          // フレーズ検出時に即座にコールバックを呼び出す
+          if (onPhraseDetected.value) {
+            onPhraseDetected.value(phrase, audioMetadata.value)
           }
         }
 
@@ -430,9 +441,6 @@ ${semanticPhrases.map(p => `「${p.phrase}」${p.semanticHint ? `（${p.semantic
             modalities: ['text'],
             instructions,
             input_audio_format: 'pcm16',
-            input_audio_transcription: {
-              model: 'whisper-1',
-            },
             turn_detection: {
               type: 'server_vad',
               threshold: 0.5,
@@ -564,6 +572,8 @@ ${semanticPhrases.map(p => `「${p.phrase}」${p.semanticHint ? `（${p.semantic
 
     onAIResponse,
     onHintCheck,
+    onPhraseDetected,
+    onLog,
     onError,
   }
 }

@@ -6,6 +6,10 @@ export default defineNuxtConfig({
     compatibilityVersion: 4,
   },
 
+  dir: {
+    public: '../public',
+  },
+
   modules: [
     '@nuxt/ui',
     '@nuxt/icon',

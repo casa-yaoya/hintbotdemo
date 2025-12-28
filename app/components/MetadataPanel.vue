@@ -1,9 +1,16 @@
 <script setup lang="ts">
 import type { AudioMetadata } from '~/composables/useRealtimeAPI'
 
+interface LogEntry {
+  timestamp: string
+  type: 'step' | 'hint'
+  message: string
+}
+
 interface Props {
   metadata: AudioMetadata
   isActive: boolean
+  logs: LogEntry[]
 }
 
 const props = defineProps<Props>()
@@ -14,18 +21,12 @@ const volumeDb = computed(() => props.metadata.volumeDb.toFixed(1))
 const silenceDurationSec = computed(() => {
   return (props.metadata.silenceDuration / 1000).toFixed(1)
 })
-
-function formatTime(timestamp?: number): string {
-  if (!timestamp) return ''
-  const date = new Date(timestamp)
-  return date.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-}
 </script>
 
 <template>
-  <div class="metadata-panel rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+  <div class="metadata-panel w-full rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
     <h3 class="mb-3 text-sm font-semibold text-slate-700">
-      オーディオメタデータ
+      ステータス
     </h3>
 
     <div class="space-y-3">
@@ -78,45 +79,52 @@ function formatTime(timestamp?: number): string {
           <div
             v-for="detection in metadata.phraseDetections"
             :key="detection.phrase"
-            class="flex flex-col gap-1 rounded-lg bg-slate-50 p-2"
+            class="flex items-center justify-between rounded-lg bg-slate-50 p-2"
           >
-            <div class="flex items-center justify-between">
-              <div class="flex items-center gap-2">
-                <UBadge
-                  :color="detection.matchType === 'exact' ? 'info' : 'warning'"
-                  variant="subtle"
-                  size="xs"
-                >
-                  {{ detection.matchType === 'exact' ? '完全' : '意味' }}
-                </UBadge>
-                <span class="text-sm text-slate-700">{{ detection.phrase }}</span>
-              </div>
-              <UIcon
-                v-if="detection.detected"
-                name="lucide:check-circle"
-                class="h-4 w-4 text-green-500"
-              />
-              <UIcon
-                v-else
-                name="lucide:circle"
-                class="h-4 w-4 text-slate-300"
-              />
+            <div class="flex items-center gap-2">
+              <UBadge
+                :color="detection.matchType === 'exact' ? 'info' : 'warning'"
+                variant="subtle"
+                size="xs"
+              >
+                {{ detection.matchType === 'exact' ? '完全' : '意味' }}
+              </UBadge>
+              <span class="text-sm text-slate-700">{{ detection.phrase }}</span>
             </div>
-            <div
-              v-if="detection.detected && detection.detectedExpression"
-              class="text-xs text-slate-500"
+            <UIcon
+              v-if="detection.detected"
+              name="lucide:check-circle"
+              class="h-4 w-4 text-green-500"
+            />
+            <UIcon
+              v-else
+              name="lucide:circle"
+              class="h-4 w-4 text-slate-300"
+            />
+          </div>
+        </div>
+      </div>
+
+      <!-- ログエリア -->
+      <div
+        v-if="logs.length > 0"
+        class="border-t border-slate-100 pt-3"
+      >
+        <h4 class="mb-2 text-sm font-medium text-slate-600">
+          ログ
+        </h4>
+        <div class="max-h-48 space-y-1 overflow-y-auto">
+          <div
+            v-for="(log, index) in logs"
+            :key="index"
+            class="flex items-start gap-2 text-xs"
+          >
+            <span class="shrink-0 font-mono text-slate-400">{{ log.timestamp }}</span>
+            <span
+              :class="log.type === 'hint' ? 'text-amber-600' : 'text-blue-600'"
             >
-              発話: 「{{ detection.detectedExpression }}」
-              <span v-if="detection.detectedAt" class="ml-2">
-                ({{ formatTime(detection.detectedAt) }})
-              </span>
-            </div>
-            <div
-              v-else-if="detection.detected && detection.detectedAt"
-              class="text-xs text-slate-500"
-            >
-              検出時刻: {{ formatTime(detection.detectedAt) }}
-            </div>
+              {{ log.message }}
+            </span>
           </div>
         </div>
       </div>

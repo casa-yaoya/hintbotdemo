@@ -1,22 +1,24 @@
 <script setup lang="ts">
-import type { AudioMetadata, HintCondition, HintRule, PhraseConfig } from '~/composables/useRealtimeAPI'
+import type { AudioMetadata, HintRule, PhraseConfig } from '~/composables/useRealtimeAPI'
+import logoImage from '~/assets/images/logo-hintbot.png'
 
-const DEFAULT_PROMPT = `あなたはフレーズ検出アシスタントです。
-ユーザーの発話を聞いて、登録されたフレーズを検出してください。
-フレーズを検出したら detect_phrase 関数を呼び出してください。`
+interface LogEntry {
+  timestamp: string
+  type: 'step' | 'hint'
+  message: string
+}
+
+const DEFAULT_PROMPT = `あなたは音声分析のエキスパートです。ユーザーの会話を聞いて、登録された内容（意味）を検出してください。内容を検出したら detect_phrase 関数を呼び出してください。`
 
 const DEFAULT_PHRASES: PhraseConfig[] = [
-  { phrase: '国士無双１３面待ち', matchType: 'exact' },
-  { phrase: 'ナレトレとヒントボットが主要なサービスです', matchType: 'exact' },
-  { phrase: 'こんにちは', matchType: 'semantic', semanticHint: '挨拶全般（おはよう、ハロー、やあ等も含む）' },
+  { phrase: 'やーたんだ', matchType: 'exact' },
 ]
 
 const DEFAULT_HINT_RULES: HintRule[] = [
   {
-    id: 'default-greeting',
-    name: '挨拶ヒント',
-    triggerPhrases: ['こんにちは'],
-    hintText: '挨拶が検出されました！元気よく返事をしましょう。',
+    id: 'default-yatan',
+    triggerPhrases: ['やーたんだ'],
+    hintText: 'たんたんだよ',
     enabled: true,
   },
 ]
@@ -28,23 +30,54 @@ const hintRules = useLocalStorage<HintRule[]>('hintbot-hint-rules', DEFAULT_HINT
 const isSettingsOpen = ref(false)
 const currentHint = ref('')
 const triggeredRuleIds = ref<Set<string>>(new Set())
+const logs = ref<LogEntry[]>([])
 
 const {
   isConnected,
-  isPlaying,
   isSpeaking,
   audioMetadata,
   toggleRoleplay,
-  manualRequestHint,
   setRegisteredPhrases,
   resetPhraseDetections,
   onAIResponse,
-  onHintCheck,
+  onPhraseDetected,
+  onLog,
   onError,
 } = useRealtimeAPI()
 
+function formatTimeWithMs(date: Date): string {
+  const hours = date.getHours().toString().padStart(2, '0')
+  const minutes = date.getMinutes().toString().padStart(2, '0')
+  const seconds = date.getSeconds().toString().padStart(2, '0')
+  const ms = date.getMilliseconds().toString().padStart(3, '0')
+  return `${hours}:${minutes}:${seconds}.${ms}`
+}
+
+function addLog(type: 'step' | 'hint', message: string) {
+  logs.value.unshift({
+    timestamp: formatTimeWithMs(new Date()),
+    type,
+    message,
+  })
+  // 最大100件保持
+  if (logs.value.length > 100) {
+    logs.value.pop()
+  }
+}
+
+// ヒントを表示する
+function showHint(hintText: string) {
+  addLog('hint', `[7] ヒント発火「${hintText}」`)
+  currentHint.value = hintText
+  setTimeout(() => {
+    currentHint.value = ''
+  }, 10000)
+}
+
 // フレーズ検出に基づいてヒントルールをチェック
 function checkHintRules(metadata: AudioMetadata): string | null {
+  addLog('step', '[6] ヒントルールチェック')
+
   const detectedPhrases = metadata.phraseDetections
     .filter(p => p.detected)
     .map(p => p.phrase)
@@ -66,15 +99,18 @@ function checkHintRules(metadata: AudioMetadata): string | null {
   return null
 }
 
-onHintCheck.value = (metadata: AudioMetadata): HintCondition => {
+// ログコールバック（useRealtimeAPIからのステップログ）
+onLog.value = (step: string) => {
+  addLog('step', step)
+}
+
+// フレーズ検出時に即座に呼び出される
+onPhraseDetected.value = (_phrase: string, metadata: AudioMetadata) => {
+  // 即座にヒントルールをチェック
   const hintText = checkHintRules(metadata)
   if (hintText) {
-    currentHint.value = hintText
-    setTimeout(() => {
-      currentHint.value = ''
-    }, 10000)
+    showHint(hintText)
   }
-  return { shouldShowHint: false }
 }
 
 // AI応答は使わない（ヒントは設定済みテキストから表示）
@@ -93,15 +129,13 @@ async function handleToggle() {
     resetPhraseDetections()
     triggeredRuleIds.value.clear()
     currentHint.value = ''
+    logs.value = []
+    addLog('step', '[1] 音声キャプチャ開始')
   }
   await toggleRoleplay({
     instructions: prompt.value,
     batchIntervalMs: 2000,
   })
-}
-
-function handleManualHint() {
-  manualRequestHint()
 }
 
 function handleUpdatePrompt(newPrompt: string) {
@@ -119,9 +153,11 @@ function handleUpdateHintRules(newRules: HintRule[]) {
 
 <template>
   <div class="flex min-h-screen flex-col items-center px-4 py-8">
-    <h1 class="mb-8 text-2xl font-bold text-slate-800">
-      HintBot
-    </h1>
+    <img
+      :src="logoImage"
+      alt="HintBot"
+      class="mb-8 h-16"
+    >
 
     <div class="flex w-full max-w-lg flex-col items-center gap-6">
       <HintBox
@@ -144,17 +180,6 @@ function handleUpdateHintRules(newRules: HintRule[]) {
         </UButton>
 
         <UButton
-          color="warning"
-          variant="soft"
-          size="lg"
-          :disabled="!isConnected || isPlaying"
-          @click="handleManualHint"
-        >
-          <UIcon name="lucide:lightbulb" class="mr-2 h-5 w-5" />
-          ヒント
-        </UButton>
-
-        <UButton
           color="neutral"
           variant="soft"
           size="lg"
@@ -168,6 +193,7 @@ function handleUpdateHintRules(newRules: HintRule[]) {
       <MetadataPanel
         :metadata="audioMetadata"
         :is-active="isConnected"
+        :logs="logs"
       />
     </div>
 
