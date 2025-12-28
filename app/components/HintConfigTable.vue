@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { HintType, MatchType, PhraseConfig } from '~/composables/useRealtimeAPI'
+import type { HintType, PhraseConfig } from '~/composables/useRealtimeAPI'
 
 interface Props {
   configs: PhraseConfig[]
@@ -15,16 +15,9 @@ const localConfigs = ref<PhraseConfig[]>([...props.configs])
 
 // 新規追加用
 const newPhrase = ref('')
-const newMatchType = ref<MatchType>('exact')
 const newDescription = ref('')
 const newHintType = ref<HintType>('fixed')
 const newHintText = ref('')
-
-const matchTypeOptions = [
-  { label: '完全一致', value: 'exact' },
-  { label: '意味一致', value: 'semantic' },
-  { label: '文脈一致', value: 'context' },
-]
 
 const hintTypeOptions = [
   { label: '固定', value: 'fixed' },
@@ -35,17 +28,10 @@ watch(() => props.configs, (val) => {
   localConfigs.value = [...val]
 }, { deep: true })
 
-function updateField(index: number, field: keyof PhraseConfig, value: string | MatchType) {
+function updateField(index: number, field: keyof PhraseConfig, value: string) {
   const config = localConfigs.value[index]
-  if (field === 'matchType') {
-    config.matchType = value as MatchType
-    // 完全一致に変更した場合、検出条件をクリア
-    if (value === 'exact') {
-      config.description = undefined
-    }
-  }
-  else if (field === 'description') {
-    config.description = (value as string).trim() || undefined
+  if (field === 'description') {
+    config.description = value.trim() || undefined
   }
   else {
     (config as Record<string, unknown>)[field] = value
@@ -61,8 +47,7 @@ function addConfig() {
   const config: PhraseConfig = {
     id: crypto.randomUUID(),
     phrase: newPhrase.value.trim(),
-    matchType: newMatchType.value,
-    description: newMatchType.value !== 'exact' ? newDescription.value.trim() : undefined,
+    description: newDescription.value.trim() || undefined,
     hintType: newHintType.value,
     hintText: newHintType.value === 'fixed' ? newHintText.value.trim() : '',
     enabled: true,
@@ -72,9 +57,8 @@ function addConfig() {
   emit('update:configs', [...localConfigs.value])
 
   newPhrase.value = ''
-  newMatchType.value = 'exact'
   newDescription.value = ''
-  newHintType.value = 'fixed'
+  newHintType.value = 'ai'
   newHintText.value = ''
 }
 
@@ -93,7 +77,7 @@ function toggleConfig(index: number) {
   <div class="hint-config-table">
     <div class="mb-2 flex items-center justify-between">
       <h3 class="text-sm font-semibold text-slate-700">
-        検出対象 / ヒント設定
+        ステータス / ヒント設定
       </h3>
     </div>
 
@@ -102,16 +86,16 @@ function toggleConfig(index: number) {
         <thead class="bg-slate-50">
           <tr>
             <th class="w-10 px-2 py-2 text-center font-medium text-slate-600">
+              #
+            </th>
+            <th class="w-10 px-2 py-2 text-center font-medium text-slate-600">
               有効
             </th>
             <th class="px-3 py-2 text-left font-medium text-slate-600">
-              検出対象
-            </th>
-            <th class="w-24 px-3 py-2 text-left font-medium text-slate-600">
-              タイプ
+              ステータス
             </th>
             <th class="px-3 py-2 text-left font-medium text-slate-600">
-              検出条件
+              ステータス定義
             </th>
             <th class="w-20 px-3 py-2 text-left font-medium text-slate-600">
               ヒント種別
@@ -133,6 +117,9 @@ function toggleConfig(index: number) {
             :class="{ 'opacity-50': !config.enabled }"
           >
             <td class="px-2 py-2 text-center">
+              <span class="text-xs font-medium text-slate-500">{{ index + 1 }}</span>
+            </td>
+            <td class="px-2 py-2 text-center">
               <UButton
                 size="xs"
                 :color="config.enabled ? 'success' : 'neutral'"
@@ -151,21 +138,10 @@ function toggleConfig(index: number) {
               />
             </td>
             <td class="px-2 py-2">
-              <USelect
-                :model-value="config.matchType"
-                :items="matchTypeOptions"
-                value-key="value"
-                size="xs"
-                class="w-full"
-                @update:model-value="updateField(index, 'matchType', $event)"
-              />
-            </td>
-            <td class="px-2 py-2">
               <UInput
                 :model-value="config.description || ''"
                 size="xs"
-                :placeholder="config.matchType === 'exact' ? '（不要）' : '検出条件...'"
-                :disabled="config.matchType === 'exact'"
+                placeholder="ステータス定義..."
                 class="w-full"
                 @update:model-value="updateField(index, 'description', $event)"
               />
@@ -200,22 +176,16 @@ function toggleConfig(index: number) {
           <!-- 新規追加行 -->
           <tr class="bg-slate-25">
             <td class="px-2 py-1 text-center">
+              <span class="text-xs text-slate-400">{{ localConfigs.length + 1 }}</span>
+            </td>
+            <td class="px-2 py-1 text-center">
               <UIcon name="lucide:plus-circle" class="h-4 w-4 text-slate-400" />
             </td>
             <td class="px-2 py-1">
               <UInput
                 v-model="newPhrase"
                 size="xs"
-                placeholder="検出対象..."
-                class="w-full"
-              />
-            </td>
-            <td class="px-2 py-1">
-              <USelect
-                v-model="newMatchType"
-                :items="matchTypeOptions"
-                value-key="value"
-                size="xs"
+                placeholder="ステータス..."
                 class="w-full"
               />
             </td>
@@ -223,8 +193,7 @@ function toggleConfig(index: number) {
               <UInput
                 v-model="newDescription"
                 size="xs"
-                :placeholder="newMatchType === 'exact' ? '（不要）' : '検出条件...'"
-                :disabled="newMatchType === 'exact'"
+                placeholder="ステータス定義..."
                 class="w-full"
               />
             </td>
