@@ -3,74 +3,98 @@ import type { PhraseConfig } from '~/composables/useRealtimeAPI'
 
 interface Props {
   configs: PhraseConfig[]
-  currentIndex: number // 現在のフローステータスインデックス（-1: 未開始、0から順にステータス）
-  detectedIndices: Set<number> // 過去に判定されたことのあるフローステータスのインデックス
-  spotName: string | null // 現在発火中のスポットステータス名
+  topicName: string | null // 現在のトピック名（null: 未確定）
+  detectedTopics: Set<string> // 過去に判定されたことのあるトピック名
+  phraseName: string | null // 現在発火中のフレーズ名
+  // 後方互換性のためのprops
+  currentIndex?: number
+  detectedIndices?: Set<number>
+  spotName?: string | null
 }
 
 const props = defineProps<Props>()
 
-// フローステータスのみ抽出
-const flowConfigs = computed(() =>
-  props.configs.filter(c => c.enabled && c.statusType === 'flow'),
+// トピック判定のみ抽出
+const topicConfigs = computed(() =>
+  props.configs.filter(c => c.enabled && (c.detectionType === 'topic' || c.statusType === 'flow')),
 )
 
-// スポットステータスのみ抽出
-const spotConfigs = computed(() =>
-  props.configs.filter(c => c.enabled && c.statusType === 'spot'),
+// フレーズ判定のみ抽出
+const phraseConfigs = computed(() =>
+  props.configs.filter(c => c.enabled && (c.detectionType === 'phrase' || c.statusType === 'spot')),
 )
+
+// 現在のフレーズ名（新旧両対応）
+const currentPhraseName = computed(() => props.phraseName ?? props.spotName)
 </script>
 
 <template>
-  <div class="flex h-full flex-col">
-    <!-- フローステータス -->
-    <div class="flex flex-col gap-0.5">
+  <div class="flex h-full flex-col overflow-hidden rounded-lg border border-slate-300 bg-white p-2">
+    <!-- ヘッダー -->
+    <div class="mb-2 flex items-center gap-1.5 border-b border-slate-200 pb-1.5">
+      <UIcon name="lucide:list-ordered" class="h-3.5 w-3.5 text-slate-500" />
+      <span class="text-xs font-medium text-slate-600">トピック進行</span>
+    </div>
+
+    <!-- トピック判定 -->
+    <div class="flex flex-col gap-0.5 overflow-y-auto">
+      <!-- トピック一覧 -->
       <div
-        v-for="(config, idx) in flowConfigs"
+        v-for="(config, idx) in topicConfigs"
         :key="config.id"
         class="flex items-center gap-1.5 rounded border px-2 py-1 text-xs transition-all"
         :class="[
-          idx === currentIndex
+          config.phrase === topicName
             ? 'animate-pulse border-green-500 bg-green-50 text-green-700'
-            : detectedIndices.has(idx)
+            : detectedTopics.has(config.phrase)
               ? 'border-blue-500 bg-blue-50 text-blue-700'
-              : 'border-slate-300 bg-white text-slate-700',
+              : 'border-slate-200 bg-slate-50 text-slate-500',
         ]"
       >
-        <span class="font-mono text-[10px]">{{ idx + 1 }}</span>
+        <span
+          class="flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[10px] font-bold"
+          :class="[
+            config.phrase === topicName
+              ? 'bg-green-500 text-white'
+              : detectedTopics.has(config.phrase)
+                ? 'bg-blue-500 text-white'
+                : 'bg-slate-300 text-slate-600',
+          ]"
+        >{{ idx + 1 }}</span>
         <span class="truncate">{{ config.phrase }}</span>
       </div>
       <div
-        v-if="flowConfigs.length === 0"
-        class="text-xs text-slate-400"
+        v-if="topicConfigs.length === 0"
+        class="py-2 text-center text-xs text-slate-400"
       >
-        フローなし
+        トピックなし
       </div>
     </div>
 
-    <!-- 区切り線（スポットステータスがある場合のみ） -->
+    <!-- 区切り線（フレーズ判定がある場合のみ） -->
     <div
-      v-if="spotConfigs.length > 0"
-      class="my-1 border-t border-dashed border-slate-300"
+      v-if="phraseConfigs.length > 0"
+      class="my-2 border-t border-dashed border-slate-200"
     />
 
-    <!-- スポットステータス（発火中のもののみ表示） -->
+    <!-- フレーズ判定（発火中のもののみ表示） -->
     <div
-      v-if="spotConfigs.length > 0"
+      v-if="phraseConfigs.length > 0"
       class="flex flex-col gap-0.5"
     >
+      <div class="mb-1 text-[10px] font-medium uppercase tracking-wider text-slate-400">PHRASE</div>
       <div
-        v-if="spotName"
-        class="flex items-center gap-1.5 rounded border px-2 py-0.5 text-[10px] transition-all animate-pulse border-amber-500 bg-amber-50 text-amber-700"
+        v-if="currentPhraseName"
+        class="flex items-center gap-1.5 rounded border px-2 py-1 text-xs transition-all animate-pulse border-amber-500 bg-amber-50 text-amber-700"
       >
         <UIcon name="lucide:zap" class="h-3 w-3 shrink-0" />
-        <span class="truncate">{{ spotName }}</span>
+        <span class="truncate">{{ currentPhraseName }}</span>
       </div>
       <div
         v-else
-        class="text-[10px] text-slate-400"
+        class="rounded border border-slate-200 bg-slate-50 px-2 py-1 text-center text-xs text-slate-400"
       >
-        -
+        待機中
       </div>
     </div>
   </div>

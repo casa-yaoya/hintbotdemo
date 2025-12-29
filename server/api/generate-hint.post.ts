@@ -36,7 +36,19 @@ ${conversationHistory || ''}
 
     const hint = response.choices[0]?.message?.content?.trim() || 'ヒントを生成できませんでした'
 
-    return { hint }
+    // トークン使用量を取得
+    const usage = response.usage
+
+    return {
+      hint,
+      usage: usage
+        ? {
+            promptTokens: usage.prompt_tokens,
+            completionTokens: usage.completion_tokens,
+            totalTokens: usage.total_tokens,
+          }
+        : null,
+    }
   }
   catch (error) {
     console.error('AIヒント生成エラー:', error)

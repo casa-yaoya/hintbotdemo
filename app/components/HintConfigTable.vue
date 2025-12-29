@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import type { HintType, PhraseConfig, StatusType } from '~/composables/useRealtimeAPI'
+import type { DetectionType, HintType, PhraseConfig } from '~/composables/useRealtimeAPI'
 
 interface Props {
   configs: PhraseConfig[]
-  statusType: StatusType
+  detectionType: DetectionType
   title: string
 }
 
@@ -13,9 +13,20 @@ const emit = defineEmits<{
   'update:configs': [value: PhraseConfig[]]
 }>()
 
-// このstatusTypeに該当するconfigのみ表示
+// このdetectionTypeに該当するconfigのみ表示（後方互換性も考慮）
 const filteredConfigs = computed(() =>
-  props.configs.filter(c => c.statusType === props.statusType),
+  props.configs.filter((c) => {
+    // 新形式: detectionTypeで判定
+    if (c.detectionType) {
+      return c.detectionType === props.detectionType
+    }
+    // 後方互換性: statusTypeで判定
+    if (c.statusType) {
+      return (props.detectionType === 'topic' && c.statusType === 'flow')
+        || (props.detectionType === 'phrase' && c.statusType === 'spot')
+    }
+    return false
+  }),
 )
 
 const localConfigs = ref<PhraseConfig[]>([...filteredConfigs.value])
@@ -37,13 +48,23 @@ watch(filteredConfigs, (val) => {
 
 // localConfigsを全体のconfigsにマージして返す
 function mergeConfigs(): PhraseConfig[] {
-  // 他のstatusTypeのconfigsを保持しつつ、このstatusTypeのものを更新
-  const otherConfigs = props.configs.filter(c => c.statusType !== props.statusType)
+  // 他のdetectionTypeのconfigsを保持しつつ、このdetectionTypeのものを更新
+  const otherConfigs = props.configs.filter((c) => {
+    if (c.detectionType) {
+      return c.detectionType !== props.detectionType
+    }
+    if (c.statusType) {
+      return !((props.detectionType === 'topic' && c.statusType === 'flow')
+        || (props.detectionType === 'phrase' && c.statusType === 'spot'))
+    }
+    return true
+  })
   return [...otherConfigs, ...localConfigs.value]
 }
 
 function updateField(index: number, field: keyof PhraseConfig, value: string) {
   const config = localConfigs.value[index]
+  if (!config) return
   if (field === 'description') {
     config.description = value.trim() || undefined
   }
@@ -62,7 +83,7 @@ function addConfig() {
     id: crypto.randomUUID(),
     phrase: newPhrase.value.trim(),
     description: newDescription.value.trim() || undefined,
-    statusType: props.statusType, // propsのstatusTypeを使用
+    detectionType: props.detectionType, // propsのdetectionTypeを使用
     hintType: newHintType.value,
     hintText: newHintType.value === 'fixed' ? newHintText.value.trim() : '',
     enabled: true,
@@ -83,9 +104,15 @@ function removeConfig(index: number) {
 }
 
 function toggleConfig(index: number) {
-  localConfigs.value[index].enabled = !localConfigs.value[index].enabled
+  const config = localConfigs.value[index]
+  if (!config) return
+  config.enabled = !config.enabled
   emit('update:configs', mergeConfigs())
 }
+
+// 判定種別に応じたラベル
+const labelPhrase = computed(() => props.detectionType === 'topic' ? 'トピック' : 'フレーズ')
+const labelDefinition = computed(() => props.detectionType === 'topic' ? 'トピック定義' : 'フレーズ定義')
 </script>
 
 <template>
@@ -107,10 +134,10 @@ function toggleConfig(index: number) {
               有効
             </th>
             <th class="px-3 py-2 text-left font-medium text-slate-600">
-              ステータス
+              {{ labelPhrase }}
             </th>
             <th class="px-3 py-2 text-left font-medium text-slate-600">
-              ステータス定義
+              {{ labelDefinition }}
             </th>
             <th class="w-20 px-3 py-2 text-left font-medium text-slate-600">
               ヒント種別
@@ -156,7 +183,7 @@ function toggleConfig(index: number) {
               <UInput
                 :model-value="config.description || ''"
                 size="xs"
-                placeholder="ステータス定義..."
+                :placeholder="`${labelDefinition}...`"
                 class="w-full"
                 @update:model-value="updateField(index, 'description', $event)"
               />
@@ -200,7 +227,7 @@ function toggleConfig(index: number) {
               <UInput
                 v-model="newPhrase"
                 size="xs"
-                placeholder="ステータス..."
+                :placeholder="`${labelPhrase}...`"
                 class="w-full"
               />
             </td>
@@ -208,7 +235,7 @@ function toggleConfig(index: number) {
               <UInput
                 v-model="newDescription"
                 size="xs"
-                placeholder="ステータス定義..."
+                :placeholder="`${labelDefinition}...`"
                 class="w-full"
               />
             </td>

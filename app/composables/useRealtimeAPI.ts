@@ -1,16 +1,22 @@
 export type HintType = 'fixed' | 'ai' // 固定ヒント or AIヒント
 
-// ステータス種別
-export type StatusType = 'flow' | 'spot' // フローステータス or スポットステータス
+// 判定種別
+export type DetectionType = 'topic' | 'phrase'
+// topic: トピック判定（会話の文脈からトピックを判定、3秒ごとにGPT-4oで判定）
+// phrase: フレーズ判定（特定のフレーズを検出したらヒントを出す、Realtime APIで即時判定）
+
+// 後方互換性のためのエイリアス（移行期間中のみ）
+export type StatusType = 'flow' | 'spot'
 
 // LLMが返す根拠タイプ
 export type EvidenceType = 'explicit' | 'implicit' | 'weak'
 
 export interface PhraseConfig {
   id: string
-  phrase: string // ステータス名
-  description?: string // ステータス定義（どのような状態か）
-  statusType: StatusType // ステータス種別（flow: フロー, spot: スポット）
+  phrase: string // トピック名 or フレーズ名
+  description?: string // 定義（どのような状態か）
+  detectionType: DetectionType // 判定種別（topic: トピック判定, phrase: フレーズ判定）
+  statusType?: StatusType // 後方互換性のため残す（移行期間中のみ）
   hintType: HintType // ヒントタイプ
   hintText: string // 固定ヒント（hintType='fixed'の場合）
   enabled: boolean
@@ -58,14 +64,19 @@ export interface HintState {
 
 // 現在の会話ステータス
 export interface CurrentStatus {
-  // フローステータス
-  index: number // 現在のフローステータスインデックス（-1: 未開始、0が最初）
-  name: string | null // 現在のフローステータス名
-  changedAt: number | null // ステータス変更時刻
+  // トピック判定
+  topicName: string | null // 現在のトピック名（null: 未確定/unknown）
+  topicChangedAt: number | null // トピック変更時刻
   recentDetections: RecentDetection[] // 短期間の検出履歴（リングバッファ）
-  // スポットステータス
-  spotName: string | null // 現在発火中のスポットステータス名（null: 発火なし）
-  spotChangedAt: number | null // スポットステータス変更時刻
+  // フレーズ判定
+  phraseName: string | null // 現在発火中のフレーズ名（null: 発火なし）
+  phraseChangedAt: number | null // フレーズ変更時刻
+  // 後方互換性のため残す（移行期間中のみ）
+  index: number // 現在のトピックインデックス（-1: 未確定）
+  name: string | null // 現在のトピック名
+  changedAt: number | null // ステータス変更時刻
+  spotName: string | null // 現在発火中のフレーズ名
+  spotChangedAt: number | null // フレーズ変更時刻
 }
 
 export interface AudioMetadata {
@@ -84,12 +95,91 @@ export interface HintCondition {
   reason?: string
 }
 
+// トークンログエントリ
+export type TokenLogPurpose = 'transcribe' | 'topic-detection' | 'phrase-detection' | 'hint-generation'
+
+export interface TokenLogEntry {
+  timestamp: string
+  purpose: TokenLogPurpose
+  api: string
+  promptTokens?: number
+  completionTokens?: number
+  totalTokens?: number
+  audioSeconds?: number
+  cost: number // USD
+}
+
+// API料金（2025年1月時点）
+export const API_PRICING: Record<string, { input?: number, output?: number, perMinute?: number, inputText?: number, outputText?: number }> = {
+  'gpt-4o': {
+    input: 2.5 / 1_000_000, // $2.50/1M tokens
+    output: 10 / 1_000_000, // $10/1M tokens
+  },
+  'gpt-4o-mini': {
+    input: 0.15 / 1_000_000, // $0.15/1M tokens
+    output: 0.6 / 1_000_000, // $0.60/1M tokens
+  },
+  'gpt-4o-transcribe': {
+    perMinute: 0.006, // $0.006/分
+  },
+  'gpt-4o-mini-transcribe': {
+    perMinute: 0.003, // $0.003/分
+  },
+  'whisper-1': {
+    perMinute: 0.006, // $0.006/分
+  },
+  'gpt-4o-realtime': {
+    inputText: 5 / 1_000_000, // $5/1M tokens
+    outputText: 20 / 1_000_000, // $20/1M tokens
+  },
+}
+
+// モデル選択肢
+export const MODEL_OPTIONS = {
+  transcribe: [
+    { value: 'gpt-4o-mini-transcribe', label: 'gpt-4o-mini-transcribe（$0.003/分）' },
+    { value: 'gpt-4o-transcribe', label: 'gpt-4o-transcribe（$0.006/分）' },
+    { value: 'whisper-1', label: 'whisper-1（$0.006/分）' },
+  ],
+  topicDetection: [
+    { value: 'gpt-4o-mini', label: 'gpt-4o-mini（$0.15/$0.60 per 1M）' },
+    { value: 'gpt-4o', label: 'gpt-4o（$2.50/$10 per 1M）' },
+  ],
+}
+
+// デフォルトモデル設定
+export const DEFAULT_MODELS = {
+  transcribe: 'gpt-4o-mini-transcribe',
+  topicDetection: 'gpt-4o-mini',
+}
+
 export interface RealtimeConfig {
   instructions?: string
   debounceMs?: number // 連続発火抑止時間（デフォルト1500ms）
   confirmDelayMs?: number // 仮判定→確定までの待機時間（デフォルト800ms）
   hintGenerationPrompt?: string // AIヒント生成プロンプト
   getConversationHistory?: () => string[] // 会話履歴を取得する関数
+  transcribeModel?: string // 文字起こしモデル
+  topicDetectionModel?: string // トピック判定モデル
+}
+
+// コスト計算ヘルパー
+function getTranscribeCost(model: string, audioMinutes: number): number {
+  const pricing = API_PRICING[model]
+  if (pricing?.perMinute) {
+    return audioMinutes * pricing.perMinute
+  }
+  // フォールバック
+  return audioMinutes * 0.003
+}
+
+function getTokenCost(model: string, promptTokens: number, completionTokens: number): number {
+  const pricing = API_PRICING[model]
+  if (pricing?.input && pricing?.output) {
+    return promptTokens * pricing.input + completionTokens * pricing.output
+  }
+  // フォールバック (gpt-4o-mini料金)
+  return promptTokens * (0.15 / 1_000_000) + completionTokens * (0.6 / 1_000_000)
 }
 
 const SAMPLE_RATE = 24000
@@ -242,10 +332,17 @@ export function useRealtimeAPI() {
 
   // 現在の会話ステータス
   const currentStatus = ref<CurrentStatus>({
-    index: -1, // -1: 未開始
+    // トピック判定
+    topicName: null, // null: 未確定
+    topicChangedAt: null,
+    recentDetections: [],
+    // フレーズ判定
+    phraseName: null,
+    phraseChangedAt: null,
+    // 後方互換性
+    index: -1,
     name: null,
     changedAt: null,
-    recentDetections: [],
     spotName: null,
     spotChangedAt: null,
   })
@@ -261,6 +358,9 @@ export function useRealtimeAPI() {
     lastTranscript: undefined,
   })
 
+  // トークンログ
+  const tokenLogs = ref<TokenLogEntry[]>([])
+
   const onAIResponse = ref<((text: string, isFinal: boolean) => void) | null>(null)
   const onHintCheck = ref<((metadata: AudioMetadata) => HintCondition) | null>(null)
   const onPhraseDetected = ref<((phrase: string, metadata: AudioMetadata, isProvisional: boolean) => void) | null>(null)
@@ -268,6 +368,7 @@ export function useRealtimeAPI() {
   const onTranscript = ref<((transcript: string, isFinal: boolean) => void) | null>(null)
   const onLog = ref<((step: string) => void) | null>(null)
   const onError = ref<((error: string) => void) | null>(null)
+  const onTokenLog = ref<((entry: TokenLogEntry) => void) | null>(null)
 
   let websocket: WebSocket | null = null
   let audioContext: AudioContext | null = null
@@ -304,31 +405,83 @@ export function useRealtimeAPI() {
   let confirmDelayMs = 800
   let hintGenerationPrompt = '検出された内容に応じて、営業マンとして次にやるべきことの適切なヒントを、10文字以内で出して'
   let getConversationHistory: (() => string[]) | null = null
+  let transcribeModel = DEFAULT_MODELS.transcribe
+  let topicDetectionModel = DEFAULT_MODELS.topicDetection
+
+  // トピック判定
+  let isTopicDetectionInProgress = false
 
   /**
-   * LLM用プロンプトを構築（会話ステータス判定）
+   * タイムスタンプをフォーマット
    */
-  function buildInstructions(_baseInstructions: string, phrases: PhraseConfig[]): string {
-    const enabledPhrases = phrases.filter(p => p.enabled)
+  function formatTimeWithMs(date: Date): string {
+    const hours = date.getHours().toString().padStart(2, '0')
+    const minutes = date.getMinutes().toString().padStart(2, '0')
+    const seconds = date.getSeconds().toString().padStart(2, '0')
+    const ms = date.getMilliseconds().toString().padStart(3, '0')
+    return `${hours}:${minutes}:${seconds}.${ms}`
+  }
 
-    if (enabledPhrases.length === 0) {
-      return `あなたは会話のステータスを判定するシステムです。
-通常のテキスト返答は一切行わないでください。
-現在、判定対象のステータスは登録されていません。`
+  /**
+   * トークンログを追加
+   */
+  function addTokenLog(entry: Omit<TokenLogEntry, 'timestamp'>) {
+    const logEntry: TokenLogEntry = {
+      ...entry,
+      timestamp: formatTimeWithMs(new Date()),
+    }
+    tokenLogs.value.push(logEntry)
+    if (onTokenLog.value) {
+      onTokenLog.value(logEntry)
+    }
+  }
+
+  /**
+   * トークンログをリセット
+   */
+  function resetTokenLogs() {
+    tokenLogs.value = []
+  }
+
+  /**
+   * トークンログの合計コストを計算
+   */
+  function getTotalTokenCost(): { totalCost: number, breakdown: Record<TokenLogPurpose, number> } {
+    const breakdown: Record<TokenLogPurpose, number> = {
+      'transcribe': 0,
+      'topic-detection': 0,
+      'phrase-detection': 0,
+      'hint-generation': 0,
+    }
+    let totalCost = 0
+
+    for (const log of tokenLogs.value) {
+      breakdown[log.purpose] += log.cost
+      totalCost += log.cost
     }
 
-    // 現在のステータス情報
-    const currentStatusInfo = currentStatus.value.index === -1
-      ? '会話開始前（最初のステータス「' + enabledPhrases[0]?.phrase + '」への移行を待機中）'
-      : `${currentStatus.value.index + 1}. 「${currentStatus.value.name}」`
+    return { totalCost, breakdown }
+  }
 
-    const instructions = `あなたは会話の進行状況を追跡し、現在のステータスを判定するシステムです。
+  /**
+   * LLM用プロンプトを構築（フレーズ判定）
+   */
+  function buildInstructions(_baseInstructions: string, phrases: PhraseConfig[]): string {
+    // フレーズ判定用のconfigsのみ抽出
+    const phraseConfigs = phrases.filter(p => p.enabled && (p.detectionType === 'phrase' || p.statusType === 'spot'))
+
+    if (phraseConfigs.length === 0) {
+      return `あなたはフレーズ検出システムです。
+通常のテキスト返答は一切行わないでください。
+現在、判定対象のフレーズは登録されていません。`
+    }
+
+    const instructions = `あなたは会話の中から特定のフレーズやキーワードを検出するシステムです。
 
 【重要なルール】
 - 通常のテキスト返答は一切行わないでください
-- ステータスの移行を検出した場合のみ detect_phrase 関数を呼び出してください
-- ステータス移行が検出されなかった場合は何も返さないでください（abstain）
-- 会話は基本的に順番通りに進みますが、前後したり戻ったりする可能性もあります
+- 登録されたフレーズに関連する発話を検出した場合のみ detect_phrase 関数を呼び出してください
+- フレーズが検出されなかった場合は何も返さないでください（abstain）
 
 【確信度と根拠タイプのルール】
 detect_phrase を呼び出す際は、必ず confidence と evidence_type を正確に評価してください：
@@ -339,7 +492,7 @@ confidence（確信度）:
 - 0.75未満: 不十分 → detect_phrase を呼び出さないこと
 
 evidence_type（根拠タイプ）:
-- explicit: 話者が明示的にそのステータスに関する内容を述べた
+- explicit: 話者が明示的にそのフレーズに関する内容を述べた
 - implicit: 直接的な言及はないが、文脈から高い確度で推測できる
 - weak: 弱い根拠や推測のみ → detect_phrase を呼び出さないこと
 
@@ -348,30 +501,27 @@ evidence_type（根拠タイプ）:
 - evidence_type = 'weak' の場合は絶対に detect_phrase を呼び出さない
 - 曖昧な場合、推測の場合は何も返さない（過検出より見逃しを選ぶ）
 
-【現在のステータス】
-${currentStatusInfo}
-
-【ステータス一覧】（順番に進む想定だが、前後する可能性あり）
-${enabledPhrases.map((p, index) => {
+【検出対象フレーズ一覧】
+${phraseConfigs.map((p, index) => {
   const desc = p.description ? `: ${p.description}` : ''
-  const isCurrent = currentStatus.value.index === index ? ' ← 現在' : ''
-  return `${index + 1}. 「${p.phrase}」${desc}${isCurrent}`
+  return `${index + 1}. 「${p.phrase}」${desc}`
 }).join('\n')}
 
-→ ステータス移行を検出した場合、detected_expression に実際に聞こえた発話内容を正確に引用してください。
+→ フレーズを検出した場合、detected_expression に実際に聞こえた発話内容を正確に引用してください。
 `
 
     return instructions
   }
 
   /**
-   * LLM用ツール定義を構築（ステータス判定）
+   * LLM用ツール定義を構築（フレーズ判定）
    * Gate C: confidence と evidence_type を返すように拡張
    */
   function buildTools(phrases: PhraseConfig[]) {
-    const enabledPhrases = phrases.filter(p => p.enabled)
+    // フレーズ判定用のconfigsのみ抽出
+    const phraseConfigs = phrases.filter(p => p.enabled && (p.detectionType === 'phrase' || p.statusType === 'spot'))
 
-    if (enabledPhrases.length === 0) {
+    if (phraseConfigs.length === 0) {
       return []
     }
 
@@ -379,7 +529,7 @@ ${enabledPhrases.map((p, index) => {
       {
         type: 'function',
         name: 'detect_phrase',
-        description: `会話のステータスが移行したことを検出した場合に呼び出す。
+        description: `登録されたフレーズに関連する発話を検出した場合に呼び出す。
 【重要】confidence >= 0.75 かつ evidence_type != 'weak' の場合のみ呼び出すこと。
 少しでも曖昧な場合は呼び出さず、何も返さないこと（abstain）。`,
         parameters: {
@@ -387,12 +537,12 @@ ${enabledPhrases.map((p, index) => {
           properties: {
             phrase: {
               type: 'string',
-              description: '移行先のステータス名',
-              enum: enabledPhrases.map(p => p.phrase),
+              description: '検出されたフレーズ名',
+              enum: phraseConfigs.map(p => p.phrase),
             },
             detected_expression: {
               type: 'string',
-              description: 'ステータス移行を示す発話内容（実際に聞こえた言葉を引用）',
+              description: 'フレーズ検出の根拠となる発話内容（実際に聞こえた言葉を引用）',
             },
             confidence: {
               type: 'number',
@@ -540,15 +690,27 @@ ${enabledPhrases.map((p, index) => {
       }
       const base64Audio = btoa(binary)
 
-      const response = await $fetch<{ text: string }>('/api/transcribe', {
+      const response = await $fetch<{ text: string, model: string, usage?: { audioSeconds: number } }>('/api/transcribe', {
         method: 'POST',
-        body: { audio: base64Audio },
+        body: { audio: base64Audio, model: transcribeModel },
       })
+
+      // トークンログを記録
+      if (response.usage) {
+        const audioMinutes = response.usage.audioSeconds / 60
+        const cost = getTranscribeCost(response.model, audioMinutes)
+        addTokenLog({
+          purpose: 'transcribe',
+          api: response.model,
+          audioSeconds: response.usage.audioSeconds,
+          cost,
+        })
+      }
 
       return response.text || null
     }
     catch (error) {
-      console.error('gpt-4o-transcribe error:', error)
+      console.error('transcribe error:', error)
       return null
     }
   }
@@ -631,6 +793,9 @@ ${enabledPhrases.map((p, index) => {
     if (onLog.value) onLog.value(`文字起こし完了「${transcript}」`)
     if (onTranscript.value) onTranscript.value(transcript, true)
 
+    // 発話の切れ目でトピック判定を実行（非同期、待たない）
+    detectTopic()
+
     // Realtime APIにテキストとしてメッセージを送信し、LLMでステータス判定
     sendEvent({
       type: 'conversation.item.create',
@@ -658,7 +823,7 @@ ${enabledPhrases.map((p, index) => {
   /**
    * 仮判定を開始する
    */
-  function startProvisionalHint(phraseId: string, hintText: string, statusName: string) {
+  function startProvisionalHint(phraseId: string, hintText: string, detectedName: string) {
     const now = Date.now()
 
     // デバウンスチェック
@@ -673,26 +838,34 @@ ${enabledPhrases.map((p, index) => {
       confirmTimer = null
     }
 
-    // 該当するPhraseConfigを取得してステータス種別を判定
-    const phraseConfig = registeredPhrases.value.find(p => p.phrase === statusName)
-    const statusType = phraseConfig?.statusType || 'flow'
+    // 該当するPhraseConfigを取得して判定種別を判定
+    const phraseConfig = registeredPhrases.value.find(p => p.phrase === detectedName)
+    // detectionTypeを優先し、なければstatusTypeから変換（後方互換性）
+    const detectionType = phraseConfig?.detectionType
+      || (phraseConfig?.statusType === 'flow' ? 'topic' : 'phrase')
 
-    if (statusType === 'flow') {
-      // フローステータス: インデックスを更新
-      const enabledFlowPhrases = registeredPhrases.value.filter(p => p.enabled && p.statusType === 'flow')
-      const statusIndex = enabledFlowPhrases.findIndex(p => p.phrase === statusName)
+    if (detectionType === 'topic') {
+      // トピック判定: トピック名とインデックスを更新
+      const enabledTopics = registeredPhrases.value.filter(p => p.enabled && (p.detectionType === 'topic' || p.statusType === 'flow'))
+      const topicIndex = enabledTopics.findIndex(p => p.phrase === detectedName)
       currentStatus.value = {
         ...currentStatus.value,
-        index: statusIndex,
-        name: statusName,
+        topicName: detectedName,
+        topicChangedAt: now,
+        // 後方互換性
+        index: topicIndex,
+        name: detectedName,
         changedAt: now,
       }
     }
     else {
-      // スポットステータス: スポット名を更新（前のスポットは消える）
+      // フレーズ判定: フレーズ名を更新（前のフレーズは消える）
       currentStatus.value = {
         ...currentStatus.value,
-        spotName: statusName,
+        phraseName: detectedName,
+        phraseChangedAt: now,
+        // 後方互換性
+        spotName: detectedName,
         spotChangedAt: now,
       }
     }
@@ -703,7 +876,7 @@ ${enabledPhrases.map((p, index) => {
       phraseId,
       hintText,
       detectedAt: now,
-      statusName,
+      statusName: detectedName,
     }
 
     lastHintTriggerTime[phraseId] = now
@@ -776,10 +949,17 @@ ${enabledPhrases.map((p, index) => {
    */
   function resetStatus() {
     currentStatus.value = {
+      // トピック判定
+      topicName: null,
+      topicChangedAt: null,
+      recentDetections: [],
+      // フレーズ判定
+      phraseName: null,
+      phraseChangedAt: null,
+      // 後方互換性
       index: -1,
       name: null,
       changedAt: null,
-      recentDetections: [],
       spotName: null,
       spotChangedAt: null,
     }
@@ -795,7 +975,10 @@ ${enabledPhrases.map((p, index) => {
         ? `【会話履歴】\n${conversationHistory.slice(-10).join('\n')}`
         : ''
 
-      const response = await $fetch<{ hint: string }>('/api/generate-hint', {
+      const response = await $fetch<{
+        hint: string
+        usage?: { promptTokens: number, completionTokens: number, totalTokens: number }
+      }>('/api/generate-hint', {
         method: 'POST',
         body: {
           prompt: hintGenerationPrompt,
@@ -805,11 +988,113 @@ ${enabledPhrases.map((p, index) => {
         },
       })
 
+      // トークンログを記録
+      if (response.usage) {
+        const hintModel = 'gpt-4o-mini'
+        const cost = getTokenCost(hintModel, response.usage.promptTokens, response.usage.completionTokens)
+        addTokenLog({
+          purpose: 'hint-generation',
+          api: hintModel,
+          promptTokens: response.usage.promptTokens,
+          completionTokens: response.usage.completionTokens,
+          totalTokens: response.usage.totalTokens,
+          cost,
+        })
+      }
+
       return response.hint || 'ヒントを生成できませんでした'
     }
     catch (error) {
       console.error('AIヒント生成エラー:', error)
       return 'ヒント生成エラー'
+    }
+  }
+
+  /**
+   * トピック判定を実行する（発話の切れ目で呼び出される）
+   */
+  async function detectTopic() {
+    if (isTopicDetectionInProgress) return
+    if (!isConnected.value) return
+
+    const conversationHistory = getConversationHistory ? getConversationHistory() : []
+
+    // 会話履歴がない場合はスキップ
+    if (conversationHistory.length === 0) return
+
+    isTopicDetectionInProgress = true
+
+    try {
+      // トピック判定用の設定のみ抽出
+      const topicConfigs = registeredPhrases.value.filter(
+        p => p.enabled && (p.detectionType === 'topic' || p.statusType === 'flow'),
+      )
+
+      if (topicConfigs.length === 0) {
+        isTopicDetectionInProgress = false
+        return
+      }
+
+      const topicDefinitions = topicConfigs.map(c => ({
+        name: c.phrase,
+        description: c.description,
+      }))
+
+      const response = await $fetch<{
+        topic: string | null
+        reason: string
+        rawResponse: string
+        model: string
+        usage?: { promptTokens: number, completionTokens: number, totalTokens: number }
+      }>('/api/detect-topic', {
+        method: 'POST',
+        body: {
+          conversationHistory,
+          topicDefinitions,
+          currentTopic: currentStatus.value.topicName,
+          model: topicDetectionModel,
+        },
+      })
+
+      // トークンログを記録
+      if (response.usage) {
+        const cost = getTokenCost(response.model, response.usage.promptTokens, response.usage.completionTokens)
+        addTokenLog({
+          purpose: 'topic-detection',
+          api: response.model,
+          promptTokens: response.usage.promptTokens,
+          completionTokens: response.usage.completionTokens,
+          totalTokens: response.usage.totalTokens,
+          cost,
+        })
+      }
+
+      // トピックが変化した場合のみ処理
+      if (response.topic && response.topic !== currentStatus.value.topicName) {
+        const detectedTopicConfig = topicConfigs.find(c => c.phrase === response.topic)
+
+        if (detectedTopicConfig) {
+          const reasonText = response.reason ? `（${response.reason}）` : ''
+          if (onLog.value) {
+            onLog.value(`トピック判定「${response.topic}」${reasonText}`)
+          }
+
+          // ヒントテキストを決定
+          let hintText = detectedTopicConfig.hintText
+          if (detectedTopicConfig.hintType === 'ai') {
+            hintText = await generateAIHint(response.topic, response.rawResponse || response.topic)
+          }
+
+          // 仮判定→確定の流れ
+          startProvisionalHint(detectedTopicConfig.id, hintText, response.topic)
+        }
+      }
+    }
+    catch (error) {
+      console.error('トピック判定エラー:', error)
+    }
+    finally {
+      isTopicDetectionInProgress = false
     }
   }
 
@@ -1160,6 +1445,8 @@ ${enabledPhrases.map((p, index) => {
     confirmDelayMs = config?.confirmDelayMs ?? 800
     hintGenerationPrompt = config?.hintGenerationPrompt ?? '検出された内容に応じて、営業マンとして次にやるべきことの適切なヒントを、10文字以内で出して'
     getConversationHistory = config?.getConversationHistory ?? null
+    transcribeModel = config?.transcribeModel ?? DEFAULT_MODELS.transcribe
+    topicDetectionModel = config?.topicDetectionModel ?? DEFAULT_MODELS.topicDetection
 
     try {
       const response = await $fetch<{ client_secret: string }>('/api/realtime-session', {
@@ -1196,15 +1483,16 @@ ${enabledPhrases.map((p, index) => {
           },
         })
 
-        // 接続成功時、最初のフローステータスを点滅状態にする
-        const enabledFlowPhrases = registeredPhrases.value.filter(p => p.enabled && p.statusType === 'flow')
-        if (enabledFlowPhrases.length > 0) {
-          currentStatus.value = {
-            ...currentStatus.value,
-            index: 0,
-            name: enabledFlowPhrases[0]?.phrase ?? null,
-            changedAt: Date.now(),
-          }
+        // 接続成功時、トピックは「未確定」から始まる
+        // （以前はフローステータスの最初を点滅させていたが、新仕様では未確定から開始）
+        currentStatus.value = {
+          ...currentStatus.value,
+          topicName: null, // 未確定
+          topicChangedAt: null,
+          // 後方互換性
+          index: -1,
+          name: null,
+          changedAt: null,
         }
 
         startAudioCapture()
@@ -1252,6 +1540,7 @@ ${enabledPhrases.map((p, index) => {
     isPlaying.value = false
     lastHintTriggerTime = {}
     isResponseInProgress = false
+    isTopicDetectionInProgress = false
   }
 
   async function toggleRoleplay(config?: RealtimeConfig) {
@@ -1323,6 +1612,7 @@ ${enabledPhrases.map((p, index) => {
     registeredPhrases,
     hintState,
     currentStatus,
+    tokenLogs,
 
     toggleRoleplay,
     startRoleplay,
@@ -1333,6 +1623,8 @@ ${enabledPhrases.map((p, index) => {
     resetPhraseDetections,
     cancelProvisionalHint,
     confirmHint,
+    resetTokenLogs,
+    getTotalTokenCost,
 
     onAIResponse,
     onHintCheck,
@@ -1341,5 +1633,6 @@ ${enabledPhrases.map((p, index) => {
     onTranscript,
     onLog,
     onError,
+    onTokenLog,
   }
 }

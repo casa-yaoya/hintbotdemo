@@ -17,7 +17,7 @@ export default defineEventHandler(async (event) => {
 
   try {
     const body = await readBody(event)
-    const { audio } = body as { audio: string }
+    const { audio, model } = body as { audio: string, model?: string }
 
     if (!audio) {
       throw createError({
@@ -35,9 +35,14 @@ export default defineEventHandler(async (event) => {
     // Fileオブジェクトを作成
     const audioFile = new File([wavBuffer], 'audio.wav', { type: 'audio/wav' })
 
-    // gpt-4o-transcribeで文字起こし
+    // 音声の秒数を計算（PCM16, 24kHz, mono = 2 bytes per sample）
+    const audioSeconds = audioBuffer.length / (24000 * 2)
+
+    // 文字起こしモデル（デフォルト: gpt-4o-mini-transcribe）
+    const transcribeModel = model || 'gpt-4o-mini-transcribe'
+
     const response = await openai.audio.transcriptions.create({
-      model: 'gpt-4o-transcribe',
+      model: transcribeModel,
       file: audioFile,
       language: 'ja',
       response_format: 'json',
@@ -45,6 +50,10 @@ export default defineEventHandler(async (event) => {
 
     return {
       text: response.text,
+      model: transcribeModel,
+      usage: {
+        audioSeconds,
+      },
     }
   }
   catch (error) {
