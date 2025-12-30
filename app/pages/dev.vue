@@ -344,9 +344,12 @@ const currentConfigTable = computed(() =>
   <div class="flex min-h-screen flex-col bg-slate-100">
     <!-- ロゴヘッダー -->
     <div class="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-2">
-      <img src="~/assets/images/logo-hintbot-hori.png" alt="HintBot" class="h-8">
+      <div class="flex items-end gap-2">
+        <img src="~/assets/images/logoa.svg" alt="HintBot" class="h-5">
+        <span class="text-sm text-slate-500 leading-none">構築</span>
+      </div>
       <NuxtLink to="/" class="text-sm text-slate-500 hover:text-slate-700">
-        ユーザーモード
+        実行ページへ
       </NuxtLink>
     </div>
 

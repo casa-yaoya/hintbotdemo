@@ -149,9 +149,14 @@ async function handleToggle() {
 
 <template>
   <div class="flex h-dvh flex-col bg-white p-4 sm:items-center sm:justify-center sm:p-8">
-    <!-- ロゴ -->
+    <!-- ロゴ（ダブルクリックでdevページへ） -->
     <div class="mb-2 sm:mb-4">
-      <img src="~/assets/images/logoa.svg" alt="HintBot" class="h-6 sm:h-7 mx-auto">
+      <img
+        src="~/assets/images/logoa.svg"
+        alt="HintBot"
+        class="h-6 sm:h-7 mx-auto cursor-default"
+        @dblclick="navigateTo('/dev')"
+      >
     </div>
 
     <!-- ヒント表示エリア -->
