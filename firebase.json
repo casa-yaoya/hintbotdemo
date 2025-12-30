@@ -1,4 +1,7 @@
 {
+  "firestore": {
+    "rules": "firestore.rules"
+  },
   "hosting": {
     "public": ".output/public",
     "ignore": [
@@ -8,9 +11,29 @@
     ],
     "rewrites": [
       {
+        "source": "/api/realtime-session",
+        "function": "realtimeSession"
+      },
+      {
+        "source": "/api/transcribe",
+        "function": "transcribe"
+      },
+      {
+        "source": "/api/detect-topic",
+        "function": "detectTopic"
+      },
+      {
+        "source": "/api/generate-hints",
+        "function": "generateHints"
+      },
+      {
         "source": "**",
         "destination": "/index.html"
       }
     ]
+  },
+  "functions": {
+    "source": "functions",
+    "runtime": "nodejs22"
   }
 }

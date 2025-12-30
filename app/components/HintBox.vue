@@ -8,14 +8,21 @@ interface Props {
   isSpeaking: boolean
   isListening: boolean
   layout?: 'default' | 'horizontal'
+  errorMessage?: string | null
 }
 
 const props = withDefaults(defineProps<Props>(), {
   layout: 'default',
   statusName: null,
+  errorMessage: null,
 })
 
+const hasError = computed(() => !!props.errorMessage)
+
 const displayText = computed(() => {
+  if (props.errorMessage) {
+    return props.errorMessage
+  }
   if (props.hintText) {
     return props.hintText
   }
@@ -35,11 +42,13 @@ const hasHint = computed(() => props.hintStatus !== 'none' && props.hintText)
     class="hint-box relative flex w-full items-center justify-center rounded-xl transition-all duration-300"
     :class="[
       layout === 'horizontal' ? 'h-28 px-6 py-4' : 'h-full min-h-[200px] rounded-2xl p-6',
-      isConfirmed
-        ? 'bg-primary-100 shadow-lg shadow-primary-200'
-        : isProvisional
-          ? 'bg-amber-50 shadow-md shadow-amber-100'
-          : 'bg-violet-50',
+      hasError
+        ? 'bg-red-50 shadow-md shadow-red-100'
+        : isConfirmed
+          ? 'bg-primary-100 shadow-lg shadow-primary-200'
+          : isProvisional
+            ? 'bg-amber-50 shadow-md shadow-amber-100'
+            : 'bg-violet-50',
       isSpeaking ? 'ring-2 ring-primary-400 ring-offset-2' : '',
     ]"
   >
@@ -96,9 +105,10 @@ const hasHint = computed(() => props.hintStatus !== 'none' && props.hintText)
       class="transition-opacity duration-200 whitespace-pre-line"
       :class="[
         layout === 'horizontal' ? 'text-base' : 'text-center text-sm leading-relaxed',
+        hasError ? 'font-medium text-red-600' : '',
         isConfirmed ? 'font-medium text-primary-800' : '',
         isProvisional ? 'font-medium text-amber-700 opacity-80' : '',
-        !hasHint ? 'italic text-slate-400' : '',
+        !hasHint && !hasError ? 'italic text-slate-400' : '',
         'line-clamp-5',
       ]"
     >

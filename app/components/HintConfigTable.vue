@@ -2,6 +2,7 @@
 import type { DetectionType, PhraseConfig } from '~/composables/useRealtimeAPI'
 import { parseHintCSV } from '~/utils/csvParser'
 import { useHintSettings } from '~/composables/useHintSettings'
+import { useHintGenerator } from '~/composables/useHintGenerator'
 import draggable from 'vuedraggable'
 
 interface Props {
@@ -106,6 +107,34 @@ async function handleSaveToCloud() {
   }
 }
 
+// AI生成
+const { isGenerating, generateHints } = useHintGenerator()
+const isAiDialogOpen = ref(false)
+const aiContext = ref('')
+
+function openAiDialog() {
+  isAiDialogOpen.value = true
+}
+
+async function handleAiGenerate() {
+  if (!aiContext.value.trim()) return
+
+  const newConfigs = await generateHints({
+    context: aiContext.value,
+    detectionType: props.detectionType,
+    existingHints: localConfigs.value,
+    count: 5,
+  })
+
+  if (newConfigs.length > 0) {
+    // 新しいヒントを追加（上書きではなく追加）
+    localConfigs.value = [...localConfigs.value, ...newConfigs]
+    emit('update:configs', mergeConfigs())
+    isAiDialogOpen.value = false
+    aiContext.value = ''
+  }
+}
+
 function triggerFileInput() {
   fileInputRef.value?.click()
 }
@@ -136,7 +165,9 @@ defineExpose({
   startAdding,
   triggerFileInput,
   handleSaveToCloud,
+  openAiDialog,
   isSaving,
+  isGenerating,
   configCount: computed(() => localConfigs.value.length),
 })
 </script>
@@ -290,6 +321,46 @@ defineExpose({
         </div>
       </div>
     </div>
+
+    <!-- AI生成ダイアログ -->
+    <UModal v-model:open="isAiDialogOpen">
+      <template #content>
+        <div class="p-4">
+          <h3 class="mb-3 text-sm font-medium text-slate-700">
+            AIでヒントを生成
+          </h3>
+          <p class="mb-3 text-xs text-slate-500">
+            商品やサービスの情報を入力すると、AIが{{ detectionType === 'topic' ? 'トピック' : 'フレーズ' }}に基づくヒントを生成します。
+          </p>
+          <textarea
+            v-model="aiContext"
+            rows="6"
+            placeholder="例：当社は法人向けSaaSを提供しています。主な機能は...価格帯は...競合との違いは..."
+            class="mb-3 w-full rounded border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400"
+          />
+          <div class="flex justify-end gap-2">
+            <UButton
+              color="neutral"
+              variant="outline"
+              size="sm"
+              @click="isAiDialogOpen = false"
+            >
+              キャンセル
+            </UButton>
+            <UButton
+              color="primary"
+              size="sm"
+              :loading="isGenerating"
+              :disabled="!aiContext.trim() || isGenerating"
+              @click="handleAiGenerate"
+            >
+              <UIcon name="lucide:sparkles" class="mr-1 h-4 w-4" />
+              生成
+            </UButton>
+          </div>
+        </div>
+      </template>
+    </UModal>
 
     <template #fallback>
       <div class="hint-config-table">

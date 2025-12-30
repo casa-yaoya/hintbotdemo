@@ -101,29 +101,52 @@ const getDefaultConfigs = () => {
 }
 
 const prompt = useLocalStorage('hintbot-prompt', DEFAULT_PROMPT)
-const configs = useLocalStorage<PhraseConfig[]>('hintbot-configs', getDefaultConfigs())
+const configs = ref<PhraseConfig[]>(getDefaultConfigs())
 
 // モデル設定
 const transcribeModel = useLocalStorage('hintbot-transcribe-model', DEFAULT_MODELS.transcribe)
 const topicDetectionModel = useLocalStorage('hintbot-topic-detection-model', DEFAULT_MODELS.topicDetection)
 
-// LocalStorageの古いデータをマイグレーション（detectionTypeがない場合はプリセットをリセット）
-if (configs.value.length > 0 && configs.value.some(c => !c.detectionType)) {
-  const mode = MODE_PRESETS.find(m => m.id === selectedModeId.value)
-  if (mode) {
-    configs.value = JSON.parse(JSON.stringify(mode.configs))
-  }
-}
+// Firestoreからヒント設定を読み込み
+const { loadSettings } = useHintSettings()
+const isLoadingConfigs = ref(true)
 
-// モード変更時の処理
-watch(selectedModeId, (newModeId) => {
-  const mode = MODE_PRESETS.find(m => m.id === newModeId)
-  if (mode) {
-    // カスタムモード以外はプリセットを適用
-    if (newModeId !== 'custom') {
+async function loadConfigsFromFirestore(modeId: string) {
+  isLoadingConfigs.value = true
+  try {
+    const savedConfigs = await loadSettings(modeId)
+    if (savedConfigs && savedConfigs.length > 0) {
+      configs.value = savedConfigs
+    }
+    else {
+      // Firestoreにデータがない場合はプリセットを使用
+      const mode = MODE_PRESETS.find(m => m.id === modeId)
+      if (mode) {
+        configs.value = JSON.parse(JSON.stringify(mode.configs))
+      }
+    }
+  }
+  catch (error) {
+    console.error('Failed to load configs from Firestore:', error)
+    // エラー時はプリセットを使用
+    const mode = MODE_PRESETS.find(m => m.id === modeId)
+    if (mode) {
       configs.value = JSON.parse(JSON.stringify(mode.configs))
     }
   }
+  finally {
+    isLoadingConfigs.value = false
+  }
+}
+
+// ページ読み込み時にFirestoreからデータを取得
+onMounted(async () => {
+  await loadConfigsFromFirestore(selectedModeId.value)
+})
+
+// モード変更時の処理
+watch(selectedModeId, async (newModeId) => {
+  await loadConfigsFromFirestore(newModeId)
 })
 
 const isSettingsOpen = ref(false)
@@ -455,25 +478,23 @@ const currentConfigTable = computed(() =>
          ======================================== -->
     <div class="border-t border-slate-300 bg-white">
       <!-- ヘッダー: タイトル + タブ + 操作ボタン -->
-      <div class="flex items-center justify-between border-b border-slate-200 px-3 py-1.5">
-        <div class="flex items-center gap-3">
-          <span class="text-xs font-medium text-slate-500">トリガー＆ヒント</span>
-          <div class="flex gap-0.5 rounded bg-slate-100 p-0.5">
-            <button
-              class="rounded px-3 py-1 text-xs font-medium transition-colors"
-              :class="configTab === 'topic' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'"
-              @click="configTab = 'topic'"
-            >
-              トピック
-            </button>
-            <button
-              class="rounded px-3 py-1 text-xs font-medium transition-colors"
-              :class="configTab === 'phrase' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'"
-              @click="configTab = 'phrase'"
-            >
-              フレーズ
-            </button>
-          </div>
+      <div class="flex items-center gap-3 border-b border-slate-200 px-3 py-1.5">
+        <span class="text-xs font-medium text-slate-500">トリガー＆ヒント</span>
+        <div class="flex gap-0.5 rounded bg-slate-100 p-0.5">
+          <button
+            class="rounded px-3 py-1 text-xs font-medium transition-colors"
+            :class="configTab === 'topic' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'"
+            @click="configTab = 'topic'"
+          >
+            トピック
+          </button>
+          <button
+            class="rounded px-3 py-1 text-xs font-medium transition-colors"
+            :class="configTab === 'phrase' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'"
+            @click="configTab = 'phrase'"
+          >
+            フレーズ
+          </button>
         </div>
         <div class="flex items-center gap-2">
           <span class="text-[11px] text-slate-400">{{ currentConfigTable?.configCount ?? 0 }}件</span>
@@ -488,8 +509,16 @@ const currentConfigTable = computed(() =>
             class="flex items-center gap-1 rounded border border-slate-300 bg-white px-2 py-1 text-[11px] text-slate-600 hover:bg-slate-50"
             @click="currentConfigTable?.triggerFileInput()"
           >
-            <UIcon name="lucide:upload" class="h-3 w-3" />
+            <UIcon name="lucide:download" class="h-3 w-3" />
             CSV
+          </button>
+          <button
+            class="flex items-center gap-1 rounded border border-purple-300 bg-purple-50 px-2 py-1 text-[11px] text-purple-600 hover:bg-purple-100 disabled:opacity-50"
+            :disabled="currentConfigTable?.isGenerating"
+            @click="currentConfigTable?.openAiDialog()"
+          >
+            <UIcon name="lucide:sparkles" class="h-3 w-3" />
+            AI生成
           </button>
           <button
             class="flex items-center gap-1 rounded bg-blue-500 px-2 py-1 text-[11px] text-white hover:bg-blue-600 disabled:opacity-50"

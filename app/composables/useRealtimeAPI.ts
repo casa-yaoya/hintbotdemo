@@ -298,6 +298,10 @@ function calculateAsrQualityScore(text: string): number {
 
 
 export function useRealtimeAPI() {
+  // APIベースURL（本番環境ではFirebase Functionsを使用）
+  const runtimeConfig = useRuntimeConfig()
+  const apiBaseUrl = runtimeConfig.public.apiBaseUrl || ''
+
   const isConnected = ref(false)
   const isPlaying = ref(false)
   const isRecording = ref(false)
@@ -672,7 +676,7 @@ ${phraseConfigs.map((p, index) => {
       }
       const base64Audio = btoa(binary)
 
-      const response = await $fetch<{ text: string, model: string, usage?: { audioSeconds: number } }>('/api/transcribe', {
+      const response = await $fetch<{ text: string, model: string, usage?: { audioSeconds: number } }>(`${apiBaseUrl}/api/transcribe`, {
         method: 'POST',
         body: {
           audio: base64Audio,
@@ -973,7 +977,7 @@ ${phraseConfigs.map((p, index) => {
         rawResponse: string
         model: string
         usage?: { promptTokens: number, completionTokens: number, totalTokens: number }
-      }>('/api/detect-topic', {
+      }>(`${apiBaseUrl}/api/detect-topic`, {
         method: 'POST',
         body: {
           conversationHistory,
@@ -1357,7 +1361,7 @@ ${phraseConfigs.map((p, index) => {
     topicDetectionModel = config?.topicDetectionModel ?? DEFAULT_MODELS.topicDetection
 
     try {
-      const response = await $fetch<{ client_secret: string }>('/api/realtime-session', {
+      const response = await $fetch<{ client_secret: string }>(`${apiBaseUrl}/api/realtime-session`, {
         method: 'POST',
       })
 

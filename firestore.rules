@@ -1,0 +1,10 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // hintSettings コレクションは誰でも読み書き可能
+    match /hintSettings/{modeId} {
+      allow read, write: if true;
+    }
+  }
+}
