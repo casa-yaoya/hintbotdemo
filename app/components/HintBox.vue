@@ -34,7 +34,7 @@ const hasHint = computed(() => props.hintStatus !== 'none' && props.hintText)
   <div
     class="hint-box relative flex w-full items-center justify-center rounded-xl border-2 transition-all duration-300"
     :class="[
-      layout === 'horizontal' ? 'h-20 px-6 py-4' : 'h-full min-h-[200px] rounded-2xl p-6',
+      layout === 'horizontal' ? 'h-28 px-6 py-4' : 'h-full min-h-[200px] rounded-2xl p-6',
       isConfirmed
         ? 'border-primary-500 bg-primary-50 shadow-lg shadow-primary-200'
         : isProvisional
@@ -93,12 +93,13 @@ const hasHint = computed(() => props.hintStatus !== 'none' && props.hintText)
     </span>
 
     <p
-      class="transition-opacity duration-200"
+      class="transition-opacity duration-200 whitespace-pre-line"
       :class="[
-        layout === 'horizontal' ? 'text-xl' : 'text-center text-lg leading-relaxed',
+        layout === 'horizontal' ? 'text-base' : 'text-center text-sm leading-relaxed',
         isConfirmed ? 'font-medium text-primary-800' : '',
         isProvisional ? 'font-medium text-amber-700 opacity-80' : '',
         !hasHint ? 'italic text-slate-400' : '',
+        'line-clamp-5',
       ]"
     >
       {{ displayText }}

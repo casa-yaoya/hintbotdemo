@@ -17,7 +17,7 @@ export default defineEventHandler(async (event) => {
 
   try {
     const body = await readBody(event)
-    const { audio, model } = body as { audio: string, model?: string }
+    const { audio, model, prompt } = body as { audio: string, model?: string, prompt?: string }
 
     if (!audio) {
       throw createError({
@@ -46,6 +46,9 @@ export default defineEventHandler(async (event) => {
       file: audioFile,
       language: 'ja',
       response_format: 'json',
+      // promptで想定される単語を指定すると認識精度が向上
+      // ただし、無理やり認識されることはない（あくまでヒント）
+      ...(prompt && { prompt }),
     })
 
     return {

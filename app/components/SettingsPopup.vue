@@ -1,10 +1,9 @@
 <script setup lang="ts">
-import { MODEL_OPTIONS, DEFAULT_MODELS } from '~/composables/useRealtimeAPI'
+import { MODEL_OPTIONS } from '~/composables/useRealtimeAPI'
 
 interface Props {
   modelValue: boolean
   prompt: string
-  hintGenerationPrompt: string
   transcribeModel: string
   topicDetectionModel: string
 }
@@ -14,7 +13,6 @@ const props = defineProps<Props>()
 const emit = defineEmits<{
   'update:modelValue': [value: boolean]
   'update:prompt': [value: string]
-  'update:hintGenerationPrompt': [value: string]
   'update:transcribeModel': [value: string]
   'update:topicDetectionModel': [value: string]
 }>()
@@ -25,16 +23,11 @@ const isOpen = computed({
 })
 
 const localPrompt = ref(props.prompt)
-const localHintGenerationPrompt = ref(props.hintGenerationPrompt)
 const localTranscribeModel = ref(props.transcribeModel)
 const localTopicDetectionModel = ref(props.topicDetectionModel)
 
 watch(() => props.prompt, (val: string) => {
   localPrompt.value = val
-})
-
-watch(() => props.hintGenerationPrompt, (val: string) => {
-  localHintGenerationPrompt.value = val
 })
 
 watch(() => props.transcribeModel, (val: string) => {
@@ -51,7 +44,6 @@ const topicDetectionModelOptions = MODEL_OPTIONS.topicDetection
 
 function handleSave() {
   emit('update:prompt', localPrompt.value)
-  emit('update:hintGenerationPrompt', localHintGenerationPrompt.value)
   emit('update:transcribeModel', localTranscribeModel.value)
   emit('update:topicDetectionModel', localTopicDetectionModel.value)
   isOpen.value = false
@@ -59,7 +51,6 @@ function handleSave() {
 
 function handleCancel() {
   localPrompt.value = props.prompt
-  localHintGenerationPrompt.value = props.hintGenerationPrompt
   localTranscribeModel.value = props.transcribeModel
   localTopicDetectionModel.value = props.topicDetectionModel
   isOpen.value = false
@@ -85,21 +76,6 @@ function handleCancel() {
             v-model="localPrompt"
             :rows="4"
             placeholder="あなたは音声分析のエキスパートです。ユーザーの会話を聞いて、登録された内容（意味）を検出してください。内容を検出したら detect_phrase 関数を呼び出してください。"
-            class="w-full"
-          />
-        </div>
-
-        <div class="mb-6">
-          <label class="mb-2 block text-sm font-medium text-slate-700">
-            AIヒント生成プロンプト
-          </label>
-          <p class="mb-3 text-xs text-slate-500">
-            「AIヒント」タイプの設定で、検出時にAIがヒントを生成するためのプロンプトです。
-          </p>
-          <UTextarea
-            v-model="localHintGenerationPrompt"
-            :rows="3"
-            placeholder="検出された内容に応じて、営業マンとして次にやるべきことの適切なヒントを、10文字以内で出して"
             class="w-full"
           />
         </div>

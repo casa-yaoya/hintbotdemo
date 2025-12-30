@@ -20,7 +20,6 @@ interface SubtitleEntry {
 interface Mode {
   id: string
   name: string
-  hintGenerationPrompt: string
   configs: PhraseConfig[]
 }
 
@@ -29,7 +28,6 @@ const MODE_PRESETS: Mode[] = [
   {
     id: 'naretore',
     name: 'サービス紹介',
-    hintGenerationPrompt: '検出された内容に応じて、ナレトレのサービス紹介として適切なヒントを、10文字以内で出して',
     configs: [
       // トピック判定（会話の文脈からトピックを判定）
       {
@@ -88,17 +86,14 @@ const DEFAULT_PROMPT = ``
 // 現在選択中のモードID
 const selectedModeId = useLocalStorage('hintbot-mode', 'naretore')
 
+// 判定設定のタブ
+const configTab = ref<'topic' | 'phrase'>('topic')
+
 // モード選択オプション
 const modeOptions = MODE_PRESETS.map(mode => ({
   label: mode.name,
   value: mode.id,
 }))
-
-// デフォルト値を取得
-const getDefaultHintPrompt = () => {
-  const mode = MODE_PRESETS.find(m => m.id === selectedModeId.value)
-  return mode?.hintGenerationPrompt ?? '検出された内容に応じて、適切なヒントを10文字以内で出して'
-}
 
 const getDefaultConfigs = () => {
   const mode = MODE_PRESETS.find(m => m.id === selectedModeId.value)
@@ -106,7 +101,6 @@ const getDefaultConfigs = () => {
 }
 
 const prompt = useLocalStorage('hintbot-prompt', DEFAULT_PROMPT)
-const hintGenerationPrompt = useLocalStorage('hintbot-hint-generation-prompt', getDefaultHintPrompt())
 const configs = useLocalStorage<PhraseConfig[]>('hintbot-configs', getDefaultConfigs())
 
 // モデル設定
@@ -125,7 +119,6 @@ if (configs.value.length > 0 && configs.value.some(c => !c.detectionType)) {
 watch(selectedModeId, (newModeId) => {
   const mode = MODE_PRESETS.find(m => m.id === newModeId)
   if (mode) {
-    hintGenerationPrompt.value = mode.hintGenerationPrompt
     // カスタムモード以外はプリセットを適用
     if (newModeId !== 'custom') {
       configs.value = JSON.parse(JSON.stringify(mode.configs))
@@ -134,8 +127,10 @@ watch(selectedModeId, (newModeId) => {
 })
 
 const isSettingsOpen = ref(false)
-const isDevPanelExpanded = ref(true)
-const isConfigPanelExpanded = ref(false)
+// PC用: 開発者パネルと判定設定の一括開閉状態
+const isDevPanelsExpanded = ref(false)
+// スマホ用の開閉状態
+const isMobileDevPanelOpen = ref(false)
 const logs = ref<LogEntry[]>([])
 const subtitles = ref<SubtitleEntry[]>([])
 
@@ -151,13 +146,10 @@ const {
   audioMetadata,
   hintState,
   currentStatus,
-  tokenLogs,
   toggleRoleplay,
   setRegisteredPhrases,
   resetPhraseDetections,
-  resetTokenLogs,
   getTotalTokenCost,
-  onAIResponse,
   onHintConfirmed,
   onTranscript,
   onPhraseDetected,
@@ -205,8 +197,6 @@ onHintConfirmed.value = (hintText: string) => {
     // 次の検出まで表示を維持するか、手動でリセットする必要がある
   }, 10000)
 }
-
-onAIResponse.value = null
 
 // 文字起こしコールバック（検出されたフレーズ情報を含む）
 let lastDetectedPhrase: string | null = null
@@ -261,8 +251,11 @@ watch(() => currentStatus.value.topicName, (newTopicName) => {
 })
 
 // 合計コスト表示用
-const showCostSummary = ref(false)
-const costSummary = ref<{ totalCost: number, breakdown: Record<string, number> } | null>(null)
+const costSummary = ref<{
+  totalCost: number
+  breakdown: Record<string, number>
+  totalAudioSeconds: number
+} | null>(null)
 
 // USD→JPY換算レート
 const USD_TO_JPY = 160
@@ -278,28 +271,24 @@ function formatCostJpy(usd: number): string {
 
 async function handleToggle() {
   if (isConnected.value) {
-    // 停止時: 合計コストを計算して表示
+    // 停止時: 合計コストを計算して開発者パネルに表示
     const summary = getTotalTokenCost()
     if (summary.totalCost > 0) {
       costSummary.value = summary
-      showCostSummary.value = true
     }
   }
   else {
     // 開始時: リセット
     resetPhraseDetections()
-    resetTokenLogs()
     logs.value = []
     subtitles.value = []
     detectedTopics.value = new Set()
-    showCostSummary.value = false
     costSummary.value = null
   }
   await toggleRoleplay({
     instructions: prompt.value,
     debounceMs: 1500, // 連続発火抑止時間
     confirmDelayMs: 800, // 仮判定→確定までの待機時間
-    hintGenerationPrompt: hintGenerationPrompt.value,
     getConversationHistory: () => subtitles.value.map(s => s.text),
     transcribeModel: transcribeModel.value,
     topicDetectionModel: topicDetectionModel.value,
@@ -308,10 +297,6 @@ async function handleToggle() {
 
 function handleUpdatePrompt(newPrompt: string) {
   prompt.value = newPrompt
-}
-
-function handleUpdateHintGenerationPrompt(newPrompt: string) {
-  hintGenerationPrompt.value = newPrompt
 }
 
 function handleUpdateTranscribeModel(newModel: string) {
@@ -350,71 +335,129 @@ function handleUpdateConfigs(newConfigs: PhraseConfig[]) {
     />
 
     <!-- ========================================
-         パート2: 開発用パート（字幕・ログ等）
+         スマホ用: 開くボタン
          ======================================== -->
-    <div class="border-t border-slate-300 bg-white">
-      <div class="flex items-center justify-between border-b border-slate-200 px-4 py-2">
-        <div class="flex items-center gap-2">
-          <UIcon name="lucide:code-2" class="h-4 w-4 text-slate-500" />
-          <span class="text-sm font-medium text-slate-600">開発者パネル</span>
-        </div>
-        <button
-          class="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-700"
-          @click="isDevPanelExpanded = !isDevPanelExpanded"
-        >
-          <span>{{ isDevPanelExpanded ? '閉じる' : '開く' }}</span>
-          <UIcon
-            :name="isDevPanelExpanded ? 'lucide:chevron-up' : 'lucide:chevron-down'"
-            class="h-4 w-4"
-          />
-        </button>
-      </div>
-      <div
-        class="overflow-hidden transition-all duration-300"
-        :class="isDevPanelExpanded ? 'max-h-[500px]' : 'max-h-0'"
+    <div class="border-t border-slate-300 bg-white px-3 py-2 md:hidden">
+      <button
+        class="flex w-full items-center justify-center gap-2 rounded-lg border border-slate-300 bg-slate-50 px-4 py-2.5 text-sm text-slate-600 active:bg-slate-100"
+        @click="isMobileDevPanelOpen = !isMobileDevPanelOpen"
       >
-        <!-- 字幕・ステータス・ログ・トークン（4列横並び） -->
-        <div class="grid grid-cols-4 gap-4 p-4">
+        <UIcon name="lucide:settings-2" class="h-4 w-4" />
+        <span>{{ isMobileDevPanelOpen ? '開発者パネルを閉じる' : '開発者パネルを開く' }}</span>
+        <UIcon
+          :name="isMobileDevPanelOpen ? 'lucide:chevron-up' : 'lucide:chevron-down'"
+          class="h-4 w-4"
+        />
+      </button>
+    </div>
+
+    <!-- ========================================
+         スマホ用: 開発者パネル＆判定設定（折りたたみ）
+         ======================================== -->
+    <div
+      class="overflow-hidden transition-all duration-300 md:hidden"
+      :class="isMobileDevPanelOpen ? 'max-h-[2000px]' : 'max-h-0'"
+    >
+      <!-- 字幕 -->
+      <div class="border-t border-slate-200 bg-white p-3">
+        <h3 class="mb-2 text-sm font-medium text-slate-600">字幕</h3>
+        <SubtitleWindow :subtitles="subtitles" />
+      </div>
+
+      <!-- ログ -->
+      <div class="border-t border-slate-200 bg-white p-3">
+        <h3 class="mb-2 text-sm font-medium text-slate-600">ログ</h3>
+        <div class="h-32 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-2">
+          <div class="space-y-1">
+            <div
+              v-for="(log, index) in logs.filter(l => l.type !== 'transcript').slice(0, 20)"
+              :key="index"
+              class="flex items-start gap-2 text-xs"
+            >
+              <span class="shrink-0 font-mono text-slate-400">{{ log.timestamp }}</span>
+              <span :class="log.type === 'hint' ? 'text-amber-600' : 'text-blue-600'">
+                {{ log.message }}
+              </span>
+            </div>
+            <div
+              v-if="logs.filter(l => l.type !== 'transcript').length === 0"
+              class="text-xs text-slate-400"
+            >
+              ログなし
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 判定設定 -->
+      <div class="border-t border-slate-200 bg-slate-50 p-3">
+        <h3 class="mb-2 text-sm font-medium text-slate-600">判定設定</h3>
+        <!-- タブ切り替え -->
+        <div class="mb-3 flex gap-1 rounded-lg bg-slate-200 p-1">
+          <button
+            class="flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors"
+            :class="configTab === 'topic' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-600 hover:text-slate-800'"
+            @click="configTab = 'topic'"
+          >
+            トピック判定
+          </button>
+          <button
+            class="flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors"
+            :class="configTab === 'phrase' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-600 hover:text-slate-800'"
+            @click="configTab = 'phrase'"
+          >
+            フレーズ判定
+          </button>
+        </div>
+        <!-- タブ内容 -->
+        <HintConfigTable
+          v-if="configTab === 'topic'"
+          :configs="configs"
+          detection-type="topic"
+          @update:configs="handleUpdateConfigs"
+        />
+        <HintConfigTable
+          v-if="configTab === 'phrase'"
+          :configs="configs"
+          detection-type="phrase"
+          @update:configs="handleUpdateConfigs"
+        />
+      </div>
+    </div>
+
+    <!-- ========================================
+         PC用: 開発者パネル開閉トグルボタン
+         ======================================== -->
+    <div class="hidden justify-center border-t border-slate-300 bg-slate-100 py-2 md:flex">
+      <button
+        class="flex h-8 w-8 items-center justify-center rounded-full border border-slate-300 bg-white text-slate-500 shadow-sm transition-all hover:bg-slate-50 hover:text-slate-700"
+        @click="isDevPanelsExpanded = !isDevPanelsExpanded"
+      >
+        <UIcon
+          :name="isDevPanelsExpanded ? 'lucide:chevron-up' : 'lucide:chevron-down'"
+          class="h-5 w-5"
+        />
+      </button>
+    </div>
+
+    <!-- ========================================
+         PC用: パート2: 開発用パート（字幕・ログ等）
+         ======================================== -->
+    <div
+      class="hidden overflow-hidden border-t border-slate-300 bg-white transition-all duration-300 md:block"
+      :class="isDevPanelsExpanded ? 'max-h-[500px]' : 'max-h-0'"
+    >
+      <div class="flex items-center gap-2 border-b border-slate-200 px-4 py-2">
+        <UIcon name="lucide:code-2" class="h-4 w-4 text-slate-500" />
+        <span class="text-sm font-medium text-slate-600">開発者パネル</span>
+      </div>
+      <div>
+        <!-- 字幕・ログ・コストサマリー（3列横並び） -->
+        <div class="grid grid-cols-3 gap-4 p-4">
           <!-- 字幕ウィンドウ -->
           <div class="flex flex-col">
             <h3 class="mb-2 text-sm font-medium text-slate-600">字幕</h3>
             <SubtitleWindow :subtitles="subtitles" />
-          </div>
-
-          <!-- ステータスウィンドウ -->
-          <div class="flex flex-col">
-            <h3 class="mb-2 text-sm font-medium text-slate-600">内部状態</h3>
-            <div class="h-40 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-3">
-              <div class="space-y-2 text-sm">
-                <div class="flex items-center justify-between">
-                  <span class="text-slate-500">トピック</span>
-                  <span
-                    class="font-medium"
-                    :class="!currentStatus.topicName ? 'text-slate-400' : 'text-primary-600'"
-                  >
-                    {{ !currentStatus.topicName ? '未確定' : currentStatus.topicName }}
-                  </span>
-                </div>
-                <div class="flex items-center justify-between">
-                  <span class="text-slate-500">ボリューム</span>
-                  <div class="flex items-center gap-2">
-                    <div class="h-2 w-16 overflow-hidden rounded-full bg-slate-200">
-                      <div
-                        class="h-full rounded-full bg-primary-500 transition-all duration-100"
-                        :style="{ width: `${Math.round(audioMetadata.volume * 100)}%` }"
-                      />
-                    </div>
-                    <span class="min-w-[2.5rem] text-right text-xs text-slate-600">{{ audioMetadata.volumeDb.toFixed(0) }}dB</span>
-                  </div>
-                </div>
-                <div class="flex items-center justify-between">
-                  <span class="text-slate-500">状態</span>
-                  <span :class="isConnected ? 'text-green-600' : 'text-slate-400'">
-                    {{ isConnected ? '接続中' : '未接続' }}
-                  </span>
-                </div>
-              </div>
-            </div>
           </div>
 
           <!-- ログウィンドウ -->
@@ -444,58 +487,96 @@ function handleUpdateConfigs(newConfigs: PhraseConfig[]) {
             </div>
           </div>
 
-          <!-- トークンログウィンドウ -->
+          <!-- コストサマリーウィンドウ -->
           <div class="flex flex-col">
-            <h3 class="mb-2 text-sm font-medium text-slate-600">トークンログ</h3>
-            <TokenLogWindow :logs="tokenLogs" />
+            <h3 class="mb-2 text-sm font-medium text-slate-600">コストサマリー</h3>
+            <div class="h-40 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-2">
+              <div v-if="costSummary" class="space-y-2 text-xs">
+                <!-- 録音時間 -->
+                <div class="flex items-center justify-between border-b border-slate-200 pb-1">
+                  <span class="text-slate-500">録音時間</span>
+                  <span class="font-mono text-slate-700">{{ Math.floor(costSummary.totalAudioSeconds / 60) }}分{{ Math.floor(costSummary.totalAudioSeconds % 60) }}秒</span>
+                </div>
+                <!-- 合計コスト -->
+                <div class="flex items-center justify-between border-b border-slate-200 pb-1">
+                  <span class="font-medium text-slate-600">合計コスト</span>
+                  <span class="font-bold text-amber-600">{{ formatCostJpy(costSummary.totalCost) }}</span>
+                </div>
+                <!-- 内訳 -->
+                <div class="space-y-1 text-[11px]">
+                  <div class="flex items-center justify-between">
+                    <span class="text-slate-500">文字起こし</span>
+                    <span class="font-mono text-slate-600">{{ formatCostJpy(costSummary.breakdown['transcribe'] || 0) }}</span>
+                  </div>
+                  <div class="flex items-center justify-between">
+                    <span class="text-slate-500">トピック判定</span>
+                    <span class="font-mono text-slate-600">{{ formatCostJpy(costSummary.breakdown['topic-detection'] || 0) }}</span>
+                  </div>
+                  <div class="flex items-center justify-between">
+                    <span class="text-slate-500">フレーズ判定</span>
+                    <span class="font-mono text-slate-600">{{ formatCostJpy(costSummary.breakdown['phrase-detection'] || 0) }}</span>
+                  </div>
+                </div>
+                <!-- 1時間あたりの予測コスト -->
+                <div v-if="costSummary.totalAudioSeconds > 0" class="mt-2 border-t border-dashed border-slate-300 pt-2">
+                  <div class="flex items-center justify-between">
+                    <span class="text-slate-500">1時間換算</span>
+                    <span class="font-mono font-medium text-blue-600">{{ formatCostJpy(costSummary.totalCost * (3600 / costSummary.totalAudioSeconds)) }}</span>
+                  </div>
+                </div>
+              </div>
+              <div v-else class="flex h-full items-center justify-center text-xs text-slate-400">
+                停止後に表示
+              </div>
+            </div>
           </div>
         </div>
       </div>
     </div>
 
     <!-- ========================================
-         パート3: 判定設定（折りたたみ可能）
+         PC用: パート3: 判定設定（一括開閉）
          ======================================== -->
-    <div class="border-t border-slate-300 bg-slate-50">
-      <div class="flex items-center justify-between border-b border-slate-200 px-4 py-2">
-        <div class="flex items-center gap-2">
-          <UIcon name="lucide:list-checks" class="h-4 w-4 text-slate-500" />
-          <span class="text-sm font-medium text-slate-600">判定設定</span>
-        </div>
-        <button
-          class="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-700"
-          @click="isConfigPanelExpanded = !isConfigPanelExpanded"
-        >
-          <span>{{ isConfigPanelExpanded ? '閉じる' : '開く' }}</span>
-          <UIcon
-            :name="isConfigPanelExpanded ? 'lucide:chevron-up' : 'lucide:chevron-down'"
-            class="h-4 w-4"
-          />
-        </button>
+    <div
+      class="hidden overflow-hidden border-t border-slate-300 bg-slate-50 transition-all duration-300 md:block"
+      :class="isDevPanelsExpanded ? 'max-h-[600px]' : 'max-h-0'"
+    >
+      <div class="flex items-center gap-2 border-b border-slate-200 px-4 py-2">
+        <UIcon name="lucide:list-checks" class="h-4 w-4 text-slate-500" />
+        <span class="text-sm font-medium text-slate-600">判定設定</span>
       </div>
-      <div
-        class="overflow-hidden transition-all duration-300"
-        :class="isConfigPanelExpanded ? 'max-h-[600px]' : 'max-h-0'"
-      >
-        <div class="grid grid-cols-2 gap-4 p-4">
-          <!-- トピック判定 -->
-          <div>
-            <HintConfigTable
-              :configs="configs"
-              detection-type="topic"
-              title="トピック判定"
-              @update:configs="handleUpdateConfigs"
-            />
+      <div>
+        <div class="p-4">
+          <!-- タブ切り替え -->
+          <div class="mb-4 flex gap-1 rounded-lg bg-slate-200 p-1" style="width: fit-content;">
+            <button
+              class="rounded-md px-4 py-2 text-sm font-medium transition-colors"
+              :class="configTab === 'topic' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-600 hover:text-slate-800'"
+              @click="configTab = 'topic'"
+            >
+              トピック判定
+            </button>
+            <button
+              class="rounded-md px-4 py-2 text-sm font-medium transition-colors"
+              :class="configTab === 'phrase' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-600 hover:text-slate-800'"
+              @click="configTab = 'phrase'"
+            >
+              フレーズ判定
+            </button>
           </div>
-          <!-- フレーズ判定 -->
-          <div>
-            <HintConfigTable
-              :configs="configs"
-              detection-type="phrase"
-              title="フレーズ判定"
-              @update:configs="handleUpdateConfigs"
-            />
-          </div>
+          <!-- タブ内容 -->
+          <HintConfigTable
+            v-if="configTab === 'topic'"
+            :configs="configs"
+            detection-type="topic"
+            @update:configs="handleUpdateConfigs"
+          />
+          <HintConfigTable
+            v-if="configTab === 'phrase'"
+            :configs="configs"
+            detection-type="phrase"
+            @update:configs="handleUpdateConfigs"
+          />
         </div>
       </div>
     </div>
@@ -504,60 +585,12 @@ function handleUpdateConfigs(newConfigs: PhraseConfig[]) {
     <SettingsPopup
       v-model="isSettingsOpen"
       :prompt="prompt"
-      :hint-generation-prompt="hintGenerationPrompt"
       :transcribe-model="transcribeModel"
       :topic-detection-model="topicDetectionModel"
       @update:prompt="handleUpdatePrompt"
-      @update:hint-generation-prompt="handleUpdateHintGenerationPrompt"
       @update:transcribe-model="handleUpdateTranscribeModel"
       @update:topic-detection-model="handleUpdateTopicDetectionModel"
     />
 
-    <!-- コストサマリーモーダル -->
-    <UModal v-model:open="showCostSummary">
-      <template #content>
-        <div class="p-6">
-          <h3 class="mb-4 text-lg font-semibold text-slate-800">
-            API使用量サマリー
-          </h3>
-          <div v-if="costSummary" class="space-y-3">
-            <div class="rounded-lg bg-slate-50 p-4">
-              <div class="mb-3 flex items-center justify-between border-b border-slate-200 pb-2">
-                <span class="font-medium text-slate-700">合計コスト</span>
-                <span class="text-xl font-bold text-amber-600">
-                  {{ formatCostJpy(costSummary.totalCost) }}
-                </span>
-              </div>
-              <div class="space-y-2 text-sm">
-                <div class="flex items-center justify-between">
-                  <span class="text-slate-600">文字起こし</span>
-                  <span class="font-mono text-slate-700">{{ formatCostJpy(costSummary.breakdown['transcribe'] || 0) }}</span>
-                </div>
-                <div class="flex items-center justify-between">
-                  <span class="text-slate-600">トピック判定</span>
-                  <span class="font-mono text-slate-700">{{ formatCostJpy(costSummary.breakdown['topic-detection'] || 0) }}</span>
-                </div>
-                <div class="flex items-center justify-between">
-                  <span class="text-slate-600">フレーズ判定</span>
-                  <span class="font-mono text-slate-700">{{ formatCostJpy(costSummary.breakdown['phrase-detection'] || 0) }}</span>
-                </div>
-                <div class="flex items-center justify-between">
-                  <span class="text-slate-600">ヒント生成</span>
-                  <span class="font-mono text-slate-700">{{ formatCostJpy(costSummary.breakdown['hint-generation'] || 0) }}</span>
-                </div>
-              </div>
-            </div>
-            <div class="text-xs text-slate-500">
-              ※ Realtime APIのテキストトークンは別途課金されます
-            </div>
-          </div>
-          <div class="mt-4 flex justify-end">
-            <UButton color="primary" @click="showCostSummary = false">
-              閉じる
-            </UButton>
-          </div>
-        </div>
-      </template>
-    </UModal>
   </div>
 </template>
