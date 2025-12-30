@@ -65,29 +65,29 @@ async function handleToggle() {
 </script>
 
 <template>
-  <div class="flex h-screen flex-col items-center justify-center bg-white p-8">
+  <div class="flex h-dvh flex-col bg-white p-4 sm:items-center sm:justify-center sm:p-8">
     <!-- ヒント表示エリア -->
-    <div class="h-[300px] w-full max-w-4xl">
+    <div class="flex-1 w-full max-w-4xl sm:h-[300px] sm:flex-none">
       <HintBox
         :hint-text="hintState.hintText"
         :hint-status="hintState.status"
         :status-name="hintState.statusName"
         :is-speaking="isSpeaking"
         :is-listening="isConnected"
-        class="text-2xl"
+        class="text-lg sm:text-2xl"
       />
     </div>
 
     <!-- コントロール -->
-    <div class="mt-6">
+    <div class="flex shrink-0 justify-center py-4 sm:mt-6 sm:py-0">
       <button
-        class="flex h-12 w-12 items-center justify-center rounded-full transition-colors"
+        class="flex h-14 w-14 items-center justify-center rounded-full transition-colors active:scale-95 sm:h-12 sm:w-12"
         :class="isConnected ? 'bg-red-500 hover:bg-red-600' : 'bg-violet-500 hover:bg-violet-600'"
         @click="handleToggle"
       >
         <UIcon
           :name="isConnected ? 'lucide:square' : 'lucide:play'"
-          class="h-6 w-6 text-white"
+          class="h-7 w-7 text-white sm:h-6 sm:w-6"
         />
       </button>
     </div>
