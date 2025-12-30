@@ -10,6 +10,7 @@
     "dev": "nuxt dev",
     "generate": "nuxt generate",
     "preview": "nuxt preview",
+    "deploy": "nuxt generate && firebase deploy --only hosting",
     "postinstall": "nuxt prepare",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix"
@@ -17,10 +18,12 @@
   "dependencies": {
     "@nuxt/ui": "^4.2.1",
     "@vueuse/nuxt": "^14.1.0",
+    "firebase": "^12.7.0",
     "nuxt": "^4.2.1",
     "openai": "^6.10.0",
     "vue": "^3.5.25",
-    "vue-router": "^4.6.3"
+    "vue-router": "^4.6.3",
+    "vuedraggable": "^4.1.0"
   },
   "devDependencies": {
     "@iconify-json/lucide": "^1.2.75",

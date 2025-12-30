@@ -32,14 +32,14 @@ const hasHint = computed(() => props.hintStatus !== 'none' && props.hintText)
 
 <template>
   <div
-    class="hint-box relative flex w-full items-center justify-center rounded-xl border-2 transition-all duration-300"
+    class="hint-box relative flex w-full items-center justify-center rounded-xl transition-all duration-300"
     :class="[
       layout === 'horizontal' ? 'h-28 px-6 py-4' : 'h-full min-h-[200px] rounded-2xl p-6',
       isConfirmed
-        ? 'border-primary-500 bg-primary-50 shadow-lg shadow-primary-200'
+        ? 'bg-primary-100 shadow-lg shadow-primary-200'
         : isProvisional
-          ? 'border-amber-400 bg-amber-50/50 shadow-md shadow-amber-100'
-          : 'border-slate-200 bg-white',
+          ? 'bg-amber-50 shadow-md shadow-amber-100'
+          : 'bg-violet-50',
       isSpeaking ? 'ring-2 ring-primary-400 ring-offset-2' : '',
     ]"
   >
